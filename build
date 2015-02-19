@@ -1,0 +1,4 @@
+ghc -o cor Cor.hs
+gcc -o vid vid.c
+gcc -o snd snd.c
+
