@@ -1,4 +1,6 @@
 ghc -o cor Cor.hs
-gcc -o vid vid.c
+#ghc -o vid Vid.hs
+#gcc -o vid vid.c
 gcc -o snd snd.c
+gcc -o Epichord -framework Foundation -framework AppKit vid.m
 
