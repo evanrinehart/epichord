@@ -26,31 +26,44 @@ void showGraphics(){
 @implementation MyWindow
 
 - (void)mouseDown:theEvent {
-  printf("mouse down, talk to event pipe\n");
+  NSLog(@"%@", theEvent);
 }
 
 - (void)mouseUp:theEvent {
-  printf("mouse up, talk to event pipe\n");
+  NSLog(@"%@", theEvent);
 }
 
 - (void)rightMouseDown:theEvent {
-  printf("right mouse down, talk to event pipe\n");
+  NSLog(@"%@", theEvent);
 }
 
 - (void)rightMouseUp:theEvent {
-  printf("right mouse up, talk to event pipe\n");
+  NSLog(@"%@", theEvent);
 }
 
 - (void)mouseMoved:theEvent {
-  printf("mouse moved, talk to event pipe\n");
+  NSLog(@"%@", theEvent);
 }
 
 - (void)keyDown:theEvent {
-  printf("key down, talk to event pipe\n");
+  NSLog(@"%@", theEvent);
+  [self flushWindow];
 }
 
 - (void)keyUp:theEvent {
-  printf("key up, talk to event pipe\n");
+  NSLog(@"%@", theEvent);
+}
+
+- (void)flagsChanged:theEvent {
+  NSLog(@"%@", theEvent);
+}
+
+- (void)scrollWheel:theEvent {
+  NSLog(@"%@", theEvent);
+}
+
+- (void)display {
+  fprintf(stdout, "WINDOW DISPLAY\n");
 }
 
 @end
@@ -67,19 +80,141 @@ void showGraphics(){
 
 @end
 
+@interface MyMenuHandler : NSObject
+- (void)quit:(id)sender;
+- (void)about:(id)sender;
+- (void)booya:(id)sender;
+@end
+
+@implementation MyMenuHandler
+- (void)quit:(id)sender {
+  printf("QUIT\n");
+  exit(0);
+}
+
+- (void)about:(id)sender {
+  printf("ABOUT\n");
+}
+
+- (void)booya:sender {
+  printf("BOOYA\n");
+}
+@end
+
+
+@interface MyNotificationHandler : NSObject
+@property (assign) NSFileHandle* standardIn;
+@property (assign) NSNotificationCenter* center;
+@property int eventPipe;
+
+- (void)windowClosing:NSNotification;
+- (void)stdinReadable:NSNotification;
+- (void)windowUnminimize:NSNotification;
+- (void)windowResized:NSNotification;
+
+- (void)registerStdinReadable;
+- (void)registerWindowClosing;
+- (void)registerWindowUnminimize;
+@end
+
+@implementation MyNotificationHandler
+
+- (void)windowClosing:notif {
+  NSLog(@"%@", notif);
+  printf("window is about to close\n");
+  printf("VID GAME OVER MAN\n");
+  exit(0);
+}
+
+- (void)windowUnminimize:notif {
+  NSLog(@"%@", notif);
+  printf("window exposed\n");
+}
+
+- (void)windowResized:notif {
+  NSLog(@"%@", notif);
+  printf("window resized\n");
+}
+
+- (void)stdinReadable:notif {
+  NSLog(@"%@", notif);
+  printf("stdin readable\n");
+  NSData* data = self.standardIn.availableData;
+  if(data.length == 0){
+    fprintf(stderr, "VID stdin stream has ended. Terminating.\n");
+    exit(-1);
+  }
+  NSLog(@"contents: %@", data.description);
+  [self registerStdinReadable];
+}
+
+- (void)registerStdinReadable {
+  printf("registering\n");
+  [self.standardIn waitForDataInBackgroundAndNotify];
+  [self.center
+    addObserver:self
+    selector:@selector(stdinReadable:) 
+    name:@"NSFileHandleDataAvailableNotification"
+    object:nil ];
+}
+
+- (void)registerWindowClosing {
+  [self.center
+    addObserver:self
+    selector:@selector(windowClosing:)
+    name:@"NSWindowWillCloseNotification"
+    object:nil ];
+}
+
+- (void)registerWindowUnminimize {
+  [self.center
+    addObserver:self
+    selector:@selector(windowUnminimize:)
+    name:@"NSWindowDidDeminiaturizeNotification"
+    object:nil ];
+}
+
+- (void)registerWindowResized {
+  [self.center
+    addObserver:self
+    selector:@selector(windowResized:)
+    name:@"NSWindowDidResizeNotification"
+    object:nil ];
+}
+
+@end
+
+
 int main (int argc, const char * argv[])
 {
   //spawnCore();
   [NSAutoreleasePool new];
   [NSApplication sharedApplication];
   [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+
+  //install delegate
   ((NSApplication*)NSApp).delegate = [MyDelegate new];
+
+  //install notification handlers
+  id standardIn = [NSFileHandle fileHandleWithStandardInput];
+  MyNotificationHandler* handler = [MyNotificationHandler new];
+  handler.standardIn = standardIn;
+  handler.center = [NSNotificationCenter defaultCenter];
+  handler.eventPipe = 3;
+  [handler registerStdinReadable];
+  [handler registerWindowClosing];
+  [handler registerWindowUnminimize];
+  [handler registerWindowResized];
+
+  MyMenuHandler* menuHandler = [MyMenuHandler new];
+
   id menubar = [[NSMenu new] autorelease];
   id appMenuItem = [[NSMenuItem new] autorelease];
   [menubar addItem:appMenuItem];
   [NSApp setMainMenu:menubar];
   id appMenu = [[NSMenu new] autorelease];
   id appName = [[NSProcessInfo processInfo] processName];
+
   id quitTitle = [@"Quit " stringByAppendingString:appName];
   id quitMenuItem = [[[NSMenuItem alloc]
     initWithTitle:quitTitle
@@ -88,6 +223,16 @@ int main (int argc, const char * argv[])
   ] autorelease];
   [appMenu addItem:quitMenuItem];
   [appMenuItem setSubmenu:appMenu];
+
+  NSMenuItem* otherMenuItem = [[NSMenuItem alloc]
+    initWithTitle:@"Booya"
+    action:@selector(booya:)
+    keyEquivalent:@"123" ];
+  [otherMenuItem setTarget:menuHandler];
+  [appMenu addItem:otherMenuItem];
+  [otherMenuItem setMenu:appMenu];
+    
+
   id window = [[[MyWindow alloc] 
     initWithContentRect:NSMakeRect(0,0,640,480)
     styleMask:NSTitledWindowMask|NSClosableWindowMask|NSMiniaturizableWindowMask|NSResizableWindowMask
