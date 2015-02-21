@@ -193,16 +193,44 @@ void captureWorker(const MIDIPacketList* pktlist, void* refCon, void* srcConn){
 int setupCoreMidi(){
   OSStatus status;
   MIDIClientRef client;
-  MIDIPortRef inputPort;
 
-  status = MIDIClientCreate(CFSTR("My Midi Client"), midiNotification, NULL, &client);
-  if(status){
+  /* creating a client */
+  status = MIDIClientCreate(
+    CFStringCreateWithCString(NULL, "My Midi Client", kCFStringEncodingASCII),
+    midiNotification, NULL, &client
+  );
+  if(status != noErr){
     fprintf(stderr, "core midi client create error %d\n", status);
+    exit(-1);
   }
 
-  status = MIDIInputPortCreate(client, CFSTR("My Midi Port"), captureWorker, NULL, &inputPort);
-  if(status){
-    fprintf(stderr, "core midi port create error %d\n", status);
+  MIDIEndpointRef inputPort;
+  status = MIDIDestinationCreate(
+    client,
+    CFStringCreateWithCString(NULL,"Epichord Capture",kCFStringEncodingASCII),
+    captureWorker,
+    NULL,
+    &inputPort
+  );
+  if(status != noErr){
+    printf("error creating destination %d\n", status);
+    exit(-1);
+  }
+
+  /* TO ADVERTISE AN INPUT PORT... CREATE A DESTINATION ENDPOINT */
+  /* TO ADVERTISE AN OUTPUT PORT... CREATE A SOURCE ENDPOINT */
+  /* TO SEND TO WHATEVER CONNECTED TO OUR OUTPUT USE MIDIRECEIVED */
+  /* MIDI THAT COMES IN ON OUR OUTPUT TRIGGERS THE CAPTURE CALLBACK */
+
+  MIDIEndpointRef outputPort;
+  status = MIDISourceCreate(
+    client,
+    CFStringCreateWithCString(NULL,"Epichord Output",kCFStringEncodingASCII),
+    &outputPort
+  );
+  if(status != noErr){
+    printf("error creating source %d\n", status);
+    exit(-1);
   }
 
   return 0;
