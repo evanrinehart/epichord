@@ -10,4 +10,7 @@ The core program is a clean workspace for experiments in UI programming in
 Haskell.
 
 ![Design Diagram]
-(http://i.imgur.com/U8G2ngq.png)
+(http://i.imgur.com/sbZ015b.png)
+
+
+
