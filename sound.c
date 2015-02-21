@@ -1,8 +1,11 @@
+#include <CoreFoundation/CoreFoundation.h>
+#include <CoreMidi/CoreMidi.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <inttypes.h>
 
 /*
 commands and requests we might get
@@ -19,6 +22,21 @@ CAPTURE_ENABLE
 CAPTURE_DISABLE
 CAPTURE_DUMP
 */
+
+/* globals */
+int playFlag = 0;
+int captureFlag = 0;
+uint64_t currentTick = 0;
+uint64_t newCurrentTick = 0;
+int seekFlag = 0;
+int loopPoint[2];
+int newLoopPoint[2];
+int setLoopPointFlag = 0;
+int loopFlag = 0;
+int sampleRate = 44100;
+int beatsPerMinute = 120;
+int ticksPerBeat = 384;
+uint64_t absoluteStartTime = 0;
 
 /* input analysis buffer */
 
@@ -164,8 +182,30 @@ int ringWrite(char* src, int count){
 
 /* end capture buffer */
 
+void midiNotification(const MIDINotification* message, void* refCon){
+  fprintf(stderr, "midiNotification\n");
+}
+
+void captureWorker(const MIDIPacketList* pktlist, void* refCon, void* srcConn){
+  fprintf(stderr, "captureWorker\n");
+}
+
 int setupCoreMidi(){
-  return -1;
+  OSStatus status;
+  MIDIClientRef client;
+  MIDIPortRef inputPort;
+
+  status = MIDIClientCreate(CFSTR("My Midi Client"), midiNotification, NULL, &client);
+  if(status){
+    fprintf(stderr, "core midi client create error %d\n", status);
+  }
+
+  status = MIDIInputPortCreate(client, CFSTR("My Midi Port"), captureWorker, NULL, &inputPort);
+  if(status){
+    fprintf(stderr, "core midi port create error %d\n", status);
+  }
+
+  return 0;
 }
 
 int main(int argc, char* argv[]){
