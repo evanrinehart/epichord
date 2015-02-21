@@ -5,9 +5,42 @@
 #import <unistd.h>
 #import <stdlib.h>
 
-void spawnCore(){
-  puts("FORKING\n"); 
+void spawnCore(int* paintIn, int* eventOut){
+  int eventPipe[2];
+  int paintPipe[2];
+  char* args[] = {"core", NULL};
+  pid_t pid;
+
+  // in both of these pipes, by convention, we will use pipe 0
+  pipe(eventPipe);
+  pipe(paintPipe);
+
+  pid = fork();
+
+  if(pid == -1){
+    fprintf(stderr, "VIDEO fork failed! %s\n", strerror(errno));
+    exit(-1);
+  }
+  else if(pid == 0){ // child 
+    fprintf(stderr, "LIMINAL VIDEO->CORE preparing to exec\n");
+    close(eventPipe[0]);
+    close(paintPipe[0]);
+    close(0);
+    dup(eventPipe[1]); // we will read event commands from stdin
+    close(1);
+    dup(paintPipe[1]); // we will write paint commands to stdout
+    execve("./core", args, NULL);
+    fprintf(stderr, "LIMINAL VIDEO->CORE exec failed! %s\n", strerror(errno));
+    exit(-1);
+  }
+  else{ // parent
+    close(eventPipe[1]);
+    close(paintPipe[1]);
+    *eventOut = eventPipe[0];
+    *paintIn = paintPipe[0];
+  }
 }
+  
 
 void showGraphics(){
   CGContextRef context = [[NSGraphicsContext currentContext] graphicsPort];
@@ -69,9 +102,16 @@ void showGraphics(){
 @end
 
 @interface MyDelegate : NSObject <NSApplicationDelegate>
+@property int eventOut;
+- (id)initWithEventOut:(int)fd;
 @end
 
 @implementation MyDelegate
+
+- (id)initWithEventOut:(int)fd {
+  self.eventOut = fd;
+  return self;
+}
 
 - (NSApplicationTerminateReply)applicationShouldTerminate:sender {
   printf("application should terminate\n");
@@ -105,7 +145,9 @@ void showGraphics(){
 @interface MyNotificationHandler : NSObject
 @property (assign) NSFileHandle* standardIn;
 @property (assign) NSNotificationCenter* center;
-@property int eventPipe;
+@property int eventOut;
+
+- (id)initWithEventOut:(int)fd;
 
 - (void)windowClosing:NSNotification;
 - (void)stdinReadable:NSNotification;
@@ -119,10 +161,15 @@ void showGraphics(){
 
 @implementation MyNotificationHandler
 
+- (id)initWithEventOut:(int)fd {
+  self.eventOut = fd;
+  return self;
+}
+
 - (void)windowClosing:notif {
   NSLog(@"%@", notif);
   printf("window is about to close\n");
-  printf("VID GAME OVER MAN\n");
+  printf("VIDEO \"GAME OVER MAN\"\n");
   exit(0);
 }
 
@@ -141,7 +188,7 @@ void showGraphics(){
   printf("stdin readable\n");
   NSData* data = self.standardIn.availableData;
   if(data.length == 0){
-    fprintf(stderr, "VID stdin stream has ended. Terminating.\n");
+    fprintf(stderr, "VIDEO stdin stream has ended. Terminating.\n");
     exit(-1);
   }
   NSLog(@"contents: %@", data.description);
@@ -187,20 +234,34 @@ void showGraphics(){
 
 int main (int argc, const char * argv[])
 {
-  //spawnCore();
+  int paintIn = 0;  //stdin
+  int eventOut = 1; //stdout
+
+  fprintf(stderr, "VIDEO Hello World\n");
+
+  if(argc < 2){ // by default, spawn the core application
+    spawnCore(&paintIn, &eventOut);
+    close(0);
+    dup(paintIn);
+    close(1);
+    dup(eventOut);
+  }
+
   [NSAutoreleasePool new];
   [NSApplication sharedApplication];
   [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
 
   //install delegate
+  id delegate = [[MyDelegate alloc] initWithEventOut:eventOut];
   ((NSApplication*)NSApp).delegate = [MyDelegate new];
 
   //install notification handlers
   id standardIn = [NSFileHandle fileHandleWithStandardInput];
-  MyNotificationHandler* handler = [MyNotificationHandler new];
+  MyNotificationHandler* handler =
+    [[MyNotificationHandler alloc] initWithEventOut:eventOut];
   handler.standardIn = standardIn;
   handler.center = [NSNotificationCenter defaultCenter];
-  handler.eventPipe = 3;
+  handler.eventOut = eventOut;
   [handler registerStdinReadable];
   [handler registerWindowClosing];
   [handler registerWindowUnminimize];
