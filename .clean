@@ -1,0 +1,5 @@
+rm *.o
+rm *.hi
+rm core
+rm sound
+rm Epichord
