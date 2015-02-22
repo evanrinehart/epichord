@@ -6,6 +6,9 @@
 #include <string.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <pthread.h>
+#include <mach/mach.h>
+#include <mach/mach_time.h>
 
 /*
 commands and requests we might get
@@ -23,6 +26,8 @@ CAPTURE_DISABLE
 CAPTURE_DUMP
 */
 
+#define byte unsigned char
+
 /* globals */
 int playFlag = 0;
 int captureFlag = 0;
@@ -38,7 +43,75 @@ int beatsPerMinute = 120;
 int ticksPerBeat = 384;
 uint64_t absoluteStartTime = 0;
 
-/* input analysis buffer */
+
+MIDIClientRef client;
+MIDIEndpointRef inputPort;
+MIDIEndpointRef outputPort;
+
+
+void playTest(){
+  uint64_t now = mach_absolute_time();
+  unsigned char packetListStorage[4096];
+  MIDIPacketList* packetList = (MIDIPacketList*) packetListStorage;
+  MIDIPacket* packet = &packetList->packet[0];
+  packetList->numPackets = 1;
+  packet->timeStamp = now;
+  packet->length = 3;
+  packet->data[0] = 0x90;
+  packet->data[1] = 0x40;
+  packet->data[2] = 0x7f;
+  MIDIReceived(outputPort, packetList);
+}
+
+void stopTest(){
+  uint64_t now = mach_absolute_time();
+  unsigned char packetListStorage[4096];
+  MIDIPacketList* packetList = (MIDIPacketList*) packetListStorage;
+  MIDIPacket* packet = &packetList->packet[0];
+  packetList->numPackets = 1;
+  packet->timeStamp = now;
+  packet->length = 3;
+  packet->data[0] = 0x80;
+  packet->data[1] = 0x40;
+  packet->data[2] = 0x7f;
+  MIDIReceived(outputPort, packetList);
+}
+
+/* playback thread */
+
+struct playingNote {
+  byte playing : 1;
+  byte channel : 4;
+  byte note : 7;
+};
+
+#define PLAYING_MAX 1024
+struct playingNote playingNotes[PLAYING_MAX];
+int playingCount = 0;
+
+/*
+void* playbackWorker(void* unused){
+  if(playFlag == 0) {
+    // for all playing notes, issue a note off and unflag it
+    return NULL;
+  }
+
+
+  return NULL;
+}
+
+void spawnPlaybackWorker(){
+  pthread_t thread;
+  pthread_create(&thread, NULL, playbackWorker, NULL);
+}
+*/
+
+// PLAYBACK NOTES
+// we really need an audio callback here.
+// in the audio callback
+
+
+/* input analyzer */
 
 #define INBUFSIZE 256
 
@@ -77,10 +150,13 @@ void stdinWorker(){
   else if(strcmp(command, "PLAY")==0){
     fprintf(stderr, "play\n");
     // enable the playback flag
+    //
+    playTest();
   }
   else if(strcmp(command, "STOP")==0){
     fprintf(stderr, "stop\n");
     // killall and disable playback
+    stopTest();
   }
   else if(strcmp(command, "SEEK")==0){
     // killall, set the seek flag and position
@@ -192,7 +268,6 @@ void captureWorker(const MIDIPacketList* pktlist, void* refCon, void* srcConn){
 
 int setupCoreMidi(){
   OSStatus status;
-  MIDIClientRef client;
 
   /* creating a client */
   status = MIDIClientCreate(
@@ -204,7 +279,6 @@ int setupCoreMidi(){
     exit(-1);
   }
 
-  MIDIEndpointRef inputPort;
   status = MIDIDestinationCreate(
     client,
     CFStringCreateWithCString(NULL,"Epichord Capture",kCFStringEncodingASCII),
@@ -222,7 +296,6 @@ int setupCoreMidi(){
   /* TO SEND TO WHATEVER CONNECTED TO OUR OUTPUT USE MIDIRECEIVED */
   /* MIDI THAT COMES IN ON OUR OUTPUT TRIGGERS THE CAPTURE CALLBACK */
 
-  MIDIEndpointRef outputPort;
   status = MIDISourceCreate(
     client,
     CFStringCreateWithCString(NULL,"Epichord Output",kCFStringEncodingASCII),
@@ -236,8 +309,31 @@ int setupCoreMidi(){
   return 0;
 }
 
+struct mach_timebase_info timeBase;
+uint64_t bootTime;
+uint64_t startTime;
+uint64_t startPosition;
+uint64_t aheadTime;
+
 int main(int argc, char* argv[]){
-  fprintf(stderr, "SOUND Hello World\n");
+  bootTime = mach_absolute_time();
+  mach_timebase_info(&timeBase);
+  fprintf(stderr, "SOUND Hello World %llu\n", bootTime);
+  fprintf(stderr, "SOUND Hello World %lu\n", ULONG_MAX);
+
+  uint64_t last = bootTime;
+  uint64_t now = bootTime;
+  uint64_t diff;
+/*
+  for(;;){
+    now = mach_absolute_time();
+    diff = now - last;
+    last = now;
+    fprintf(stderr, "delta = %llu %llu %.2f%%\n", diff, diff-1000000, 100*(diff-1000000)/1000000.0);
+    usleep(1000);
+  }
+*/
+  
   if(setupCoreMidi()){
     fprintf(stderr, "SOUND CoreMidi setup failed.\n");
     exit(-1);
