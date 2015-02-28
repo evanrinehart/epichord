@@ -140,7 +140,7 @@ main = do
   hPutStrLn stderr "CORE Hello World"
   Right smf <- fmap canonical <$> readMidi "midis/South_Face_Shrine.mid"
   print (mf_header smf)
-  --putAscii smf
+--  putAscii smf
   dumpMidiFile "1234" "1234" smf
 --  x <- getLine
 --  hPputStrLn stderr ("COR i heard " ++ x)

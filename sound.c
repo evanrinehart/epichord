@@ -10,178 +10,142 @@
 #include <mach/mach.h>
 #include <mach/mach_time.h>
 
-/*
-commands and requests we might get
-LOAD path/to/data
-PLAY
-STOP
-SEEK position
-LOOP_POINT position1 position2
-LOOP_ENABLE
-LOOP_DISABLE 
-SET_PARAMETERS
-TELL (report current position in samples)
-CAPTURE_ENABLE
-CAPTURE_DISABLE
-CAPTURE_DUMP
-*/
-
-#define byte unsigned char
 #define FRAME_SIZE_NS 20000000
+#define PLAYING_MAX 1024
+#define INBUF_SIZE 1024
+#define PACKET_LIST_SIZE 4096
 
-/* globals */
-int playFlag = 0;
-int captureFlag = 0;
-uint64_t currentTick = 0;
-uint64_t newCurrentTick = 0;
-int seekFlag = 0;
-int loopPoint[2];
-int newLoopPoint[2];
-int setLoopPointFlag = 0;
-int loopFlag = 0;
-int sampleRate = 44100;
-int beatsPerMinute = 120;
-//int ticksPerBeat = 384;
-uint64_t absoluteStartNs = 0;
+struct sequencerEvent {
+  uint32_t tick;
+  uint64_t atNs;
+  uint8_t typeChan;
+  uint8_t arg1;
+  uint8_t arg2;
+};
 
-/*
-#define NANOSECONDS_PER_FRAME 20000000
-int currentFrame = 0;
-uint64_t absolutePreStartNs = 0;
-double absoluteStartNs = 0;
-double previousTick = 0;
-struct mach_timebase_info timeBase;
-double loopOffsetNs = 0;
-double loopDurationNs = 0;
-double previousTempoTick = 0;
-double previousTempoNs = 0;
-double nextTempoNs = 0;
-double nanosecondsPerTick = 100000;
+struct tempoChange {
+  uint32_t tick;
+  uint64_t atNs;
+  uint32_t uspq; // microseconds per quarter note
+};
 
-void playFrame(){
-  currentFrame += 1;
-  
-  uint64_t absoluteCurrent = mach_absolute_time();
-  uint64_t playTimeMachs = absoluteCurrent - absoluteStart;
-  double countNs = (double)playTimeMachs * timeBase.denom / timeBase.numer;
-  playChunkNs(countNs);
-}
-
-void playChunkNs(double countNs){
-  double playTimeNsWrapped;
-  double x, y, r;
-  double currentTick;
-
-  if(playTimeNs >= loopOffsetNs + loopDurationNs){
-    x = playTimeNs - loopOffset;
-    y = loopDurationNs;
-    playTimeNsWrapped = (x - y * floor(x / y)) + loopOffsetNs;
-  }
-  else{
-    playTimeNsWrapped = playTimeNs;
-  }
-
-  if(playTimeNsWrapped >= nextTempoTick){
-    // do work up to the nextTempoTick
-    // subtract nextTempoNs - previousNs from 
-  }
-
-  r = nanosecondsPerTick;
-  currentTick = previousTempoTick + (playTimeNsWrapped - previousTempoNs) / r;
-
-  if(currentTick > nextTempoTick){
-  }
-
-  
-}
-*/
+struct playingNote {
+  unsigned char playing : 1;
+  unsigned char channel : 4;
+  unsigned char note : 7;
+};
 
 MIDIClientRef client;
 MIDIEndpointRef inputPort;
 MIDIEndpointRef outputPort;
+pthread_t dispatchThread;
 
+int playFlag = 0;
+uint64_t absoluteStartNs;
 
-void playTest(){
-  uint64_t now = mach_absolute_time();
-  unsigned char packetListStorage[4096];
-  MIDIPacketList* packetList = (MIDIPacketList*) packetListStorage;
-  MIDIPacket* packet = &packetList->packet[0];
-  packetList->numPackets = 1;
-  packet->timeStamp = now;
-  packet->length = 3;
-  packet->data[0] = 0x90;
-  packet->data[1] = 0x40;
-  packet->data[2] = 0x7f;
-  MIDIReceived(outputPort, packetList);
-}
+struct sequencerEvent* events;
+int eventCount;
 
-void stopTest(){
-  uint64_t now = mach_absolute_time();
-  unsigned char packetListStorage[4096];
-  MIDIPacketList* packetList = (MIDIPacketList*) packetListStorage;
-  MIDIPacket* packet = &packetList->packet[0];
-  packetList->numPackets = 1;
-  packet->timeStamp = now;
-  packet->length = 3;
-  packet->data[0] = 0x80;
-  packet->data[1] = 0x40;
-  packet->data[2] = 0x7f;
-  MIDIReceived(outputPort, packetList);
-}
+struct tempoChange* tempoChanges;
+int tempoChangeCount;
 
-/* playback thread */
+uint32_t ticksPerBeat = 384;
 
-struct playingNote {
-  byte playing : 1;
-  byte channel : 4;
-  byte note : 7;
-};
-
-#define PLAYING_MAX 1024
 struct playingNote playingNotes[PLAYING_MAX];
 int playingCount = 0;
 
-/*
-void* playbackWorker(void* unused){
-  if(playFlag == 0) {
-    // for all playing notes, issue a note off and unflag it
-    return NULL;
+void initPlayingNotes(){
+  int i;
+  for(i=0; i<PLAYING_MAX; i++){
+    playingNotes[i].playing = 0;
   }
-
-
-  return NULL;
 }
 
-void spawnPlaybackWorker(){
-  pthread_t thread;
-  pthread_create(&thread, NULL, playbackWorker, NULL);
+void rememberNoteOn(int channel, int note){
+  printf("remember %d %d\n", channel, note);
+  int i;
+  for(i=0; i<PLAYING_MAX && playingNotes[i].playing==1; i++);
+  if(i >= PLAYING_MAX){
+    fprintf(stderr, "** SOUND remembering too many on-notes\n");
+    exit(-1);
+  }
+  playingNotes[i].playing = 1;
+  playingNotes[i].channel = channel;
+  playingNotes[i].note = note;
+  playingCount++;
+
+  printf("playingCount=%d\n", playingCount);
 }
-*/
 
-// PLAYBACK NOTES
-// we really need an audio callback here.
-// in the audio callback
-
-
-/* input analyzer */
-
-#define INBUFSIZE 256
-
-int currentPosition;
-
-
-void audioCallback(){
-  fprintf(stderr, "SOUND audio chunk requested\n");
+void forgetNoteOn(int channel, int note){
+  printf("forget %d %d\n", channel, note);
+  int i = 0;
+  int count = 0;
+  for(;;){
+    if(i >= PLAYING_MAX) break;
+    if(count >= playingCount) break;
+    if(playingNotes[i].playing == 1){
+      count++;
+      if(playingNotes[i].channel == channel && playingNotes[i].note == note){
+        playingNotes[i].playing = 0;
+        playingCount--;
+        break;
+      }
+    }
+    i++;
+  }
+  printf("playingCount=%d\n", playingCount);
 }
+
+// cut all playing notes
+void killAll(){
+  unsigned char packetListStorage[PACKET_LIST_SIZE];
+  MIDIPacketList* packetList = (MIDIPacketList*) packetListStorage;
+  MIDIPacket* packet;
+  unsigned char midi[3];
+  uint64_t timeOfCut = mach_absolute_time() + 2*FRAME_SIZE_NS;
+  int count = 0;
+  int i = 0;
+
+  packet = MIDIPacketListInit(packetList);
+  for(;;){
+    if(count >= playingCount) break;
+    if(i >= PLAYING_MAX) break;
+    if(playingNotes[i].playing){
+      midi[0] = 0x80 | playingNotes[i].channel;
+      midi[1] = playingNotes[i].note;
+      midi[2] = 0;
+      packet = MIDIPacketListAdd(
+        packetList,
+        PACKET_LIST_SIZE,
+        packet,
+        timeOfCut,
+        3,
+        midi
+      );
+      if(packet == NULL){
+        fprintf(stderr, "** SOUND unable to MIDIPacketListAdd (cut all)\n");
+        exit(-1);
+      }
+      playingNotes[i].playing = 0;
+      count++;
+    }
+    i++;
+  }
+  playingCount = 0;
+  MIDIReceived(outputPort, packetList);
+}
+
+
 
 
 /** the capture buffer **/
-
+/*
 #define CAPTURE_SIZE 65536
 char captureBuf[CAPTURE_SIZE];
 int captureRead = 0;
 int captureWrite = 0;
-/* copy as much out of capture buffer as possible, return count copied */
+// copy as much out of capture buffer as possible, return count copied
 int ringRead(char* dest){
   int ptr = captureWrite;
   int count;
@@ -206,7 +170,7 @@ int ringRead(char* dest){
   }
 }
 
-/* dump bytes into capture buffer. 0 if successful, 1 if not enough room */
+//dump bytes into capture buffer. 0 if successful, 1 if not enough room
 int ringWrite(char* src, int count){
   int wall = captureRead;
   int population = captureWrite >= wall
@@ -231,8 +195,7 @@ int ringWrite(char* src, int count){
     return 0;
   }
 }
-
-/* end capture buffer */
+*/
 
 void midiNotification(const MIDINotification* message, void* refCon){
   fprintf(stderr, "midiNotification\n");
@@ -284,28 +247,6 @@ int setupCoreMidi(){
 
   return 0;
 }
-
-struct sequencerEvent {
-  uint32_t tick;
-  uint64_t atNs;
-  uint8_t typeChan;
-  uint8_t arg1;
-  uint8_t arg2;
-};
-
-struct tempoChange {
-  uint32_t tick;
-  uint64_t atNs;
-  uint32_t uspq; // microseconds per quarter note
-};
-
-struct sequencerEvent* events;
-int eventCount;
-
-struct tempoChange* tempoChanges;
-int tempoChangeCount;
-
-uint32_t ticksPerBeat = 384;
 
 struct tempoChange* loadTempoChangeData(FILE* tempoFile, int* count){
   int tempoMax = 32;
@@ -384,9 +325,13 @@ struct sequencerEvent* loadSequenceData(FILE* sequenceFile, int* count){
   return eventBuf;
 }
 
-void recomputeEventTimes
-(struct sequencerEvent* events, int eventCount,
-struct tempoChange* tempoChanges, int tempoCount, uint32_t ticksPerBeat){
+void recomputeEventTimes(
+  struct sequencerEvent* events,
+  int eventCount,
+  struct tempoChange* tempoChanges,
+  int tempoCount,
+  uint32_t ticksPerBeat
+){
   int i, j;
   uint32_t default_uspq = 5000000; // 120 bpm
   uint32_t uspq = default_uspq;
@@ -449,7 +394,6 @@ void loadData(char* sequencePath, char* tempoPath){
   recomputeEventTimes(events, eventCount, tempoChanges, tempoChangeCount, ticksPerBeat);
 }
 
-#define PACKET_LIST_SIZE (1 << 17)
 
 // execute midi events within the range fromNs to toNs where 0 is the start
 // of the song. should consider loop position to repeat parts indefinitely.
@@ -481,8 +425,14 @@ void dispatchFrame(uint64_t fromNs, uint64_t toNs){
     midi[2] = events[i].arg2;
     midiSize = 3;
     if((midi[0] & 0xf0) == 0xc0 || (midi[0] & 0xf0) == 0xd0) midiSize = 2;
-    if((midi[0] & 0xf0) != 0x80){
+//    if((midi[0] & 0xf0) != 0x80){
       printf("%llu %02x %02x %02x\n", events[i].atNs, midi[0], midi[1], midi[2]);
+//    }
+    if((midi[0] & 0xf0) == 0x90 && midi[2] > 0){
+      rememberNoteOn(midi[0] & 0x0f, midi[1]);
+    }
+    if((midi[0] & 0xf0) == 0x80 || ((midi[0] & 0xf0) == 0x90 && midi[2] == 0)){
+      forgetNoteOn(midi[0] & 0x0f, midi[1]);
     }
     packet = MIDIPacketListAdd(
       packetList,
@@ -518,7 +468,7 @@ void* sleepWakeAndDispatchFrame(){
 
   for(;;){
     if(playFlag == 0){
-      // kill all notes
+      killAll();
       return NULL;
     }
     dispatchFrame(playNs - startNs, playNs + FRAME_SIZE_NS - startNs);
@@ -538,7 +488,6 @@ void* sleepWakeAndDispatchFrame(){
   }
 }
 
-pthread_t dispatchThread;
 
 void spawnDispatchThread(){
   int ret;
@@ -565,13 +514,13 @@ void joinDispatchThread(){
 
 
 void stdinWorker(){
-  char buf[INBUFSIZE];
-  char command[INBUFSIZE];
-  char arg1[INBUFSIZE];
-  char arg2[INBUFSIZE];
+  char buf[INBUF_SIZE];
+  char command[INBUF_SIZE];
+  char arg1[INBUF_SIZE];
+  char arg2[INBUF_SIZE];
   int number;
 
-  fgets(buf, INBUFSIZE, stdin);
+  fgets(buf, INBUF_SIZE, stdin);
   if(ferror(stdin)){
     fprintf(stderr, "SOUND error while reading stdin. <%s>\n", strerror(errno));
     exit(-1);
@@ -611,6 +560,19 @@ void stdinWorker(){
   else if(strcmp(command, "SEEK")==0){
     // killall, set the seek flag and position
   }
+  else if(strcmp(command, "CRASH")==0){
+    fprintf(stderr, "%d\n", 0 / (int)NULL);
+  }
+  else if(strcmp(command, "EXIT")==0){
+    playFlag = 0;
+    joinDispatchThread();
+    usleep(100000);
+    //shutdownCoreMidi();
+    exit(0);
+  }
+  else if(strcmp(command, "CUT_ALL")==0){
+    killAll();
+  }
   else if(strcmp(command, "LOOP_POINT")==0){
     // set the loop points
   }
@@ -638,7 +600,7 @@ void stdinWorker(){
   }
   else if(strcmp(command, "TELL")==0){
     fprintf(stderr, "something wants me to tell\n");
-    printf("%d\n", currentPosition);
+    //printf("%d\n", currentPosition);
   }
   else if(strcmp(command, "CAPTURE_ENABLE")==0){
     fprintf(stderr, "capture enable\n");
@@ -655,6 +617,14 @@ void stdinWorker(){
   }
 }
 
+void interrupt(int unused){
+  fprintf(stderr, "** SOUND interrupted by signal\n");
+  playFlag = 0;
+  joinDispatchThread();
+  usleep(100000);
+  exit(0);
+}
+
 int main(int argc, char* argv[]){
   fprintf(stderr, "SOUND Hello World\n");
   
@@ -662,6 +632,10 @@ int main(int argc, char* argv[]){
     fprintf(stderr, "SOUND CoreMidi setup failed.\n");
     exit(-1);
   }
+
+  initPlayingNotes();
+
+  signal(SIGINT, interrupt);
 
   for(;;) stdinWorker();
   fprintf(stderr, "SOUND impossible -2\n");
