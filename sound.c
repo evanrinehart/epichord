@@ -58,6 +58,43 @@ uint32_t ticksPerBeat = 384;
 int onlineSeekFlag = 0;
 uint64_t onlineSeekTargetNs;
 
+int loopFlag = 0;
+int loopInitialized = 0;
+uint64_t loopStartNs;
+uint64_t loopEndNs;
+double loopStartBeat;
+double loopEndBeat;
+
+uint64_t beatToNs(double beat){
+  uint32_t targetTick = beat * ticksPerBeat;
+  uint32_t uspq;
+  uint32_t baseTick;
+  int i;
+  if(tempoChangeCount == 0 || targetTick < tempoChanges[i].tick){
+    uspq = DEFAULT_USPQ;
+    baseTick = 0;
+  }
+  else{
+    for(i=0; i<tempoChangeCount-1 && targetTick > tempoChanges[i].tick; i++);
+    uspq = tempoChanges[i].uspq;
+    baseTick = tempoChanges[i].tick;
+  }
+  return (targetTick-baseTick)*1000.0*uspq/ticksPerBeat;
+}
+
+
+void setLoopEndpoints(double loop0, double loop1){
+  loopStartBeat = loop0;
+  loopEndBeat = loop1;
+  loopStartNs = beatToNs(loop0);
+  loopEndNs = beatToNs(loop1);
+  loopInitialized = 1;
+  printf("loopStartNs %llu\n", loopStartNs);
+  printf("loopEndNs %llu\n", loopEndNs);
+  printf("loopStartBeat %lf\n", loopStartBeat);
+  printf("loopEndBeat %lf\n", loopEndBeat);
+}
+
 double getCurrentBeat(){
   uint32_t uspq;
   uint32_t baseNs;
@@ -580,6 +617,8 @@ void stdinWorker(){
   int numerator;
   int denominator;
   int result;
+  double loop0;
+  double loop1;
 
   fgets(buf, INBUF_SIZE, stdin);
   if(ferror(stdin)){
@@ -649,16 +688,25 @@ void stdinWorker(){
   else if(strcmp(command, "CUT_ALL")==0){
     killAll();
   }
-  else if(strcmp(command, "LOOP_POINT")==0){
-    // set the loop points
+  else if(strcmp(command, "SET_LOOP")==0){
+    result = sscanf(buf, "%s %lf %lf", command, &loop0, &loop1);
+    if(result < 3){
+      fprintf(stderr, "** SOUND invalid SET_LOOP command (%s)\n", buf);
+    }
+    else{
+      setLoopEndpoints(loop0, loop1);
+    }
   }
-  else if(strcmp(command, "LOOP_ENABLE")==0){
-    fprintf(stderr, "loop enable\n");
-    // enable the loop flag
+  else if(strcmp(command, "ENABLE_LOOP")==0){
+    if(loopInitialized == 0){
+      fprintf(stderr, "** SOUND can't enable loop, not initialized\n");
+    }
+    else{
+      loopFlag = 1;
+    }
   }
-  else if(strcmp(command, "LOOP_DISABLE")==0){
-    fprintf(stderr, "loop disable\n");
-    // disable the loop flag
+  else if(strcmp(command, "DISABLE_LOOP")==0){
+    loopFlag = 0;
   }
   else if(strcmp(command, "TICKS_PER_BEAT")==0){
     result = sscanf(buf, "%s %d", command, &number);
