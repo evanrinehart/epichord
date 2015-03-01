@@ -1,0 +1,55 @@
+LOAD path1 path2
+  Load a sequence dump from path1 and a tempo change dump from path2.
+  Replaces the current sequence and tempo map.
+  Unlinks the files at path1 and path2 when done.
+  
+PLAY             
+  Begin playing from the current position.
+
+STOP
+  Stop playing and silence all playing notes. Does not reset play position.
+
+SEEK number
+SEEK number numerator/denominator
+  Change the play position to the specified beat.
+  Targe beat = number + numerator / denominator.
+
+TELL
+  Cause the approximate current beat position to be printed to standard out.
+  This will be in a decimal format.
+
+CRASH
+  Make the sound server execute an illegal operation to simulate a bug.
+
+EXIT
+  Sound server will terminate normally.
+
+CUT_ALL
+  Silence all playing notes that the sound server knows about.
+
+SET_LOOP beat0 beat1
+  Set the loop start and loop end positions in beats. These are whole numbers.
+
+ENABLE_LOOP
+  Make the play position loop between the loop start and loop end positions.
+  If the current play position is already after the loop end, the player
+  will seek to the loop start.
+
+DISABLE_LOOP
+  Make the player continue indefinitely.
+
+TICKS_PER_BEAT number
+  Set the beat resolution. Common values are 120, 192, 384.
+
+EXECUTE type channel arg1 arg2
+  Immediately execute a midi voice event.
+
+ENABLE_CAPTURE
+  Start capturing midi events.
+
+DISABLE_CAPTURE
+  Stop capturing midi events.
+
+CAPTURE
+  Dump all captured midi events. This should be periodically polled while
+  capture is enabled. The format is 7 bytes in hex per event.

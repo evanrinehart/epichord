@@ -315,8 +315,20 @@ void midiNotification(const MIDINotification* message, void* refCon){
   fprintf(stderr, "midiNotification\n");
 }
 
-void captureWorker(const MIDIPacketList* pktlist, void* refCon, void* srcConn){
+void captureWorker(const MIDIPacketList* packetList, void* refCon, void* srcConn){
+  const MIDIPacket* packet = &packetList->packet[0];
+  int i;
   fprintf(stderr, "captureWorker\n");
+  for(i=0; i<packetList->numPackets; i++){
+    printf("%llu %d: %x %d %d\n",
+      packet->timeStamp,
+      packet->length,
+      packet->data[0],
+      packet->data[1],
+      packet->data[2]
+    );
+    packet = MIDIPacketNext(packet);
+  }
 }
 
 int setupCoreMidi(){
@@ -703,9 +715,6 @@ void interrupt(int unused){
 }
 
 
-
-
-
 void* garbageWorker(){
   int i;
   for(;;){
@@ -735,6 +744,46 @@ void initGarbage(){
   }
 }
 
+
+void executeMidi(int type, int channel, int arg1, int arg2){
+  uint64_t now = mach_absolute_time();
+  unsigned char packetListStorage[50];
+  MIDIPacketList* packetList = (MIDIPacketList*) packetListStorage;
+  MIDIPacket* packet;
+  unsigned char midi[3];
+  int midiSize;
+  if(playFlag == 1) return;
+  packet = MIDIPacketListInit(packetList);
+  midi[0] = type << 4 | channel;
+  midi[1] = arg1;
+  midi[2] = arg2;
+  midiSize = 3;
+  if((midi[0] & 0xf0) == 0xc0 || (midi[0] & 0xf0) == 0xd0) midiSize = 2;
+  if((midi[0] & 0xf0) != 0x80){
+    fprintf(stderr, "%llu %02x %02x %02x\n", now, midi[0], midi[1], midi[2]);
+  }
+  if((midi[0] & 0xf0) == 0x90 && midi[2] > 0){
+    rememberNoteOn(midi[0] & 0x0f, midi[1]);
+  }
+  if((midi[0] & 0xf0) == 0x80 || ((midi[0] & 0xf0) == 0x90 && midi[2] == 0)){
+    forgetNoteOn(midi[0] & 0x0f, midi[1]);
+  }
+  packet = MIDIPacketListAdd(
+    packetList,
+    50,
+    packet, 
+    now,
+    midiSize,
+    midi
+  );
+  if(packet == NULL){
+    fprintf(stderr, "** SOUND 'execute' unable to MIDIPacketListAdd\n");
+    exit(-1);
+  }
+
+  MIDIReceived(outputPort, packetList);
+}
+
 void stdinWorker(){
   char buf[INBUF_SIZE];
   char command[INBUF_SIZE];
@@ -746,6 +795,7 @@ void stdinWorker(){
   int result;
   double loop0;
   double loop1;
+  int midi[4];
 
   fgets(buf, INBUF_SIZE, stdin);
   if(ferror(stdin)){
@@ -855,20 +905,27 @@ void stdinWorker(){
       }
     }
   }
-  else if(strcmp(command, "SET_PARAMETERS")==0){
-    // set the new params and set the parameter change flag 
-  }
   else if(strcmp(command, "TELL")==0){
     fprintf(stdout, "%lf\n", getCurrentBeat());
   }
-  else if(strcmp(command, "CAPTURE_ENABLE")==0){
-    fprintf(stderr, "capture enable\n");
+  else if(strcmp(command, "EXECUTE")==0){
+    result = sscanf(
+      buf, "%s %d %d %d %d",
+      command,
+      &midi[0], &midi[1], &midi[2], &midi[3]
+    );
+    if(result < 5){
+      fprintf(stderr, "** SOUND invalid EXECUTE command (%s)\n", buf);
+    }
+    else{
+      executeMidi(midi[0], midi[1], midi[2], midi[3]);
+    }
   }
-  else if(strcmp(command, "CAPTURE_DISABLE")==0){
-    fprintf(stderr, "capture disable\n");
+  else if(strcmp(command, "ENABLE_CAPTURE")==0){
   }
-  else if(strcmp(command, "CAPTURE_DUMP")==0){
-    fprintf(stderr, "dump capture buffer\n");
+  else if(strcmp(command, "DISABLE_CAPTURE")==0){
+  }
+  else if(strcmp(command, "CAPTURE")==0){
   }
   else{
     fprintf(stderr, "SOUND unrecognized command (%s)\n", buf);
