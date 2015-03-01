@@ -1,4 +1,24 @@
 LOAD path1 path2
+PLAY             
+STOP
+SEEK number
+SEEK number numerator/denominator
+TELL
+SET_LOOP beat0 beat1
+ENABLE_LOOP
+DISABLE_LOOP
+TICKS_PER_BEAT number
+ENABLE_CAPTURE
+DISABLE_CAPTURE
+CAPTURE
+EXECUTE type channel arg1 arg2
+CUT_ALL
+EXIT
+CRASH
+
+                                    * * * *
+
+LOAD path1 path2
   Load a sequence dump from path1 and a tempo change dump from path2.
   Replaces the current sequence and tempo map.
   Unlinks the files at path1 and path2 when done.

@@ -393,8 +393,6 @@ struct tempoChange* loadTempoChangeData(FILE* tempoFile, int* count){
     }
     tempoBuf[tempoPtr].tick = seven[0]<<24 | seven[1]<<16 | seven[2]<<8 | seven[3];
     tempoBuf[tempoPtr].uspq = seven[4]<<16 | seven[5]<<8  | seven[6];
-    fprintf(stderr, "%u %u %llu\n",
-      tempoBuf[tempoPtr].tick, tempoBuf[tempoPtr].uspq, tempoBuf[tempoPtr].atNs);
     tempoPtr++;
     if(tempoPtr == tempoMax){
       tempoBuf = realloc(tempoBuf, tempoMax*2*sizeof(struct tempoChange));
@@ -431,12 +429,6 @@ struct sequencerEvent* loadSequenceData(FILE* sequenceFile, int* count){
     eventBuf[eventPtr].typeChan = seven[4];
     eventBuf[eventPtr].arg1 = seven[5];
     eventBuf[eventPtr].arg2 = seven[6];
-    fprintf(stderr, "%u %x %u %u\n",
-      eventBuf[eventPtr].tick,
-      eventBuf[eventPtr].typeChan,
-      eventBuf[eventPtr].arg1,
-      eventBuf[eventPtr].arg2
-    );
     eventPtr++;
     if(eventPtr == eventMax){
       eventBuf = realloc(eventBuf, eventMax*2*sizeof(struct sequencerEvent));
@@ -491,6 +483,11 @@ void recomputeEventTimes(
 
 }
 
+int prefix(const char *pre, const char *str)
+{
+  return strncmp(pre, str, strlen(pre)) == 0;
+}
+
 // load raw sequence and tempo data from two files, then delete the files
 struct sequence* loadData(char* sequencePath, char* tempoPath){
   FILE* tempoFile;
@@ -500,6 +497,15 @@ struct sequence* loadData(char* sequencePath, char* tempoPath){
   int eventCount;
   int tempoChangeCount;
   struct sequence* seq;
+
+  if(!prefix("/tmp/epichord-", sequencePath)){
+    fprintf(stderr, "** refuse to load file from this location (%s)\n", sequencePath);
+    exit(-1);
+  }
+  if(!prefix("/tmp/epichord-", tempoPath)){
+    fprintf(stderr, "** refuse to load file from this location (%s)\n", tempoPath);
+    exit(-1);
+  }
 
   tempoFile = fopen(tempoPath, "r");
   if(tempoFile == NULL){
@@ -530,6 +536,15 @@ struct sequence* loadData(char* sequencePath, char* tempoPath){
   seq->tempoChangeCount = tempoChangeCount;
   seq->events = events;
   seq->tempoChanges = tempoChanges;
+
+  if(unlink(sequencePath)){
+    fprintf(stderr, "** SOUND failed to remove dump file (%s)\n", strerror(errno));
+    exit(-1);
+  }
+  if(unlink(tempoPath)){
+    fprintf(stderr, "** SOUND failed to remove dump file (%s)\n", strerror(errno));
+    exit(-1);
+  }
   
   return seq;
 }
@@ -569,7 +584,7 @@ void dispatchFrame(struct sequence* seq, uint64_t fromNs, uint64_t toNs){
     midiSize = 3;
     if((midi[0] & 0xf0) == 0xc0 || (midi[0] & 0xf0) == 0xd0) midiSize = 2;
     if((midi[0] & 0xf0) != 0x80){
-      fprintf(stderr, "%llu %02x %02x %02x\n", events[i].atNs, midi[0], midi[1], midi[2]);
+      //fprintf(stderr, "%llu %02x %02x %02x\n", events[i].atNs, midi[0], midi[1], midi[2]);
     }
     if((midi[0] & 0xf0) == 0x90 && midi[2] > 0){
       rememberNoteOn(midi[0] & 0x0f, midi[1]);

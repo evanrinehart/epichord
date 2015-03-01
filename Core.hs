@@ -19,8 +19,8 @@ import ZMidi.Core
 
 dumpMidiFile :: String -> String -> MidiFile -> IO ()
 dumpMidiFile n1 n2 smf = do
-  let p1 = "/tmp/epichord-voicedump-" ++ n1
-  let p2 = "/tmp/epichord-tempodump-" ++ n2
+  let p1 = "/tmp/epichord-XYZW/voicedump-" ++ n1
+  let p2 = "/tmp/epichord-XYZW/tempodump-" ++ n2
   let chunks1 = uncollateVoiceEvents smf :: [ByteString]
 --  putStrLn ((unlines . map showChunk1) chunks1)
   let chunks2 = uncollateTempoChanges smf
@@ -138,7 +138,7 @@ encodeTempoEvent w = (B.pack . map fromIntegral)
   
 main = do
   hPutStrLn stderr "CORE Hello World"
-  Right smf <- fmap canonical <$> readMidi "midis/South_Face_Shrine.mid"
+  Right smf <- fmap canonical <$> readMidi "midis/windfis2.mid"
   print (mf_header smf)
 --  putAscii smf
   dumpMidiFile "1234" "1234" smf
