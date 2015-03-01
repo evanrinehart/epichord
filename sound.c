@@ -14,6 +14,7 @@
 #define PLAYING_MAX 1024
 #define INBUF_SIZE 1024
 #define PACKET_LIST_SIZE 4096
+#define DEFAULT_USPQ 500000 // 120 bpm
 
 struct sequencerEvent {
   uint32_t tick;
@@ -41,15 +42,67 @@ MIDIEndpointRef outputPort;
 pthread_t dispatchThread;
 
 int playFlag = 0;
-uint64_t absoluteStartNs;
+uint64_t absolutePlayHeadNs;
+uint64_t absoluteLeadingEdgeNs;
+uint64_t absoluteSongStartNs;
+uint64_t songNs = 0;
 
 struct sequencerEvent* events;
 int eventCount;
 
 struct tempoChange* tempoChanges;
-int tempoChangeCount;
+int tempoChangeCount = 0;
 
 uint32_t ticksPerBeat = 384;
+
+int onlineSeekFlag = 0;
+uint64_t onlineSeekTargetNs;
+
+double getCurrentBeat(){
+  uint32_t uspq;
+  uint32_t baseNs;
+  uint64_t songNsSnap = songNs;
+  int i;
+  if(tempoChangeCount == 0 || songNsSnap < tempoChanges[i].atNs){
+    uspq = DEFAULT_USPQ;
+    baseNs = 0;
+  }
+  else{
+    for(i=0; i<tempoChangeCount-1 && songNsSnap > tempoChanges[i].atNs; i++);
+    uspq = tempoChanges[i].uspq;
+    baseNs = tempoChanges[i].atNs;
+  }
+  return (songNsSnap - baseNs)/(1000.0 * uspq);
+}
+
+void executeSeek(int number, int numerator, int denominator){
+  double beat = number + (double)numerator / denominator;
+  uint32_t targetTick = beat * ticksPerBeat;
+  uint64_t targetNs;
+  uint32_t uspq;
+  uint32_t baseTick;
+  int i;
+  printf("execute seek %d %d %d\n", number, numerator, denominator);
+  if(tempoChangeCount == 0 || targetTick < tempoChanges[i].tick){
+    uspq = DEFAULT_USPQ;
+    baseTick = 0;
+  }
+  else{
+    for(i=0; i<tempoChangeCount-1 && targetTick > tempoChanges[i].tick; i++);
+    uspq = tempoChanges[i].uspq;
+    baseTick = tempoChanges[i].tick;
+  }
+  targetNs = (targetTick-baseTick)*1000.0*uspq/ticksPerBeat;
+  printf("targetNs = %llu\n", targetNs);
+  if(playFlag == 0){
+    songNs = targetNs;
+  }
+  else{
+    onlineSeekFlag = 1;
+    onlineSeekTargetNs = targetNs;
+    usleep(FRAME_SIZE_NS/1000);
+  }
+}
 
 struct playingNote playingNotes[PLAYING_MAX];
 int playingCount = 0;
@@ -62,7 +115,6 @@ void initPlayingNotes(){
 }
 
 void rememberNoteOn(int channel, int note){
-  printf("remember %d %d\n", channel, note);
   int i;
   for(i=0; i<PLAYING_MAX && playingNotes[i].playing==1; i++);
   if(i >= PLAYING_MAX){
@@ -73,12 +125,9 @@ void rememberNoteOn(int channel, int note){
   playingNotes[i].channel = channel;
   playingNotes[i].note = note;
   playingCount++;
-
-  printf("playingCount=%d\n", playingCount);
 }
 
 void forgetNoteOn(int channel, int note){
-  printf("forget %d %d\n", channel, note);
   int i = 0;
   int count = 0;
   for(;;){
@@ -94,7 +143,6 @@ void forgetNoteOn(int channel, int note){
     }
     i++;
   }
-  printf("playingCount=%d\n", playingCount);
 }
 
 // cut all playing notes
@@ -103,7 +151,7 @@ void killAll(){
   MIDIPacketList* packetList = (MIDIPacketList*) packetListStorage;
   MIDIPacket* packet;
   unsigned char midi[3];
-  uint64_t timeOfCut = mach_absolute_time() + 2*FRAME_SIZE_NS;
+  uint64_t timeOfCut = absoluteLeadingEdgeNs;
   int count = 0;
   int i = 0;
 
@@ -135,6 +183,7 @@ void killAll(){
   playingCount = 0;
   MIDIReceived(outputPort, packetList);
 }
+
 
 
 
@@ -325,6 +374,7 @@ struct sequencerEvent* loadSequenceData(FILE* sequenceFile, int* count){
   return eventBuf;
 }
 
+
 void recomputeEventTimes(
   struct sequencerEvent* events,
   int eventCount,
@@ -333,7 +383,7 @@ void recomputeEventTimes(
   uint32_t ticksPerBeat
 ){
   int i, j;
-  uint32_t default_uspq = 5000000; // 120 bpm
+  uint32_t default_uspq = DEFAULT_USPQ;
   uint32_t uspq = default_uspq;
   uint64_t prevNs = 0;
   uint32_t prevTick = 0;
@@ -425,9 +475,9 @@ void dispatchFrame(uint64_t fromNs, uint64_t toNs){
     midi[2] = events[i].arg2;
     midiSize = 3;
     if((midi[0] & 0xf0) == 0xc0 || (midi[0] & 0xf0) == 0xd0) midiSize = 2;
-//    if((midi[0] & 0xf0) != 0x80){
-      printf("%llu %02x %02x %02x\n", events[i].atNs, midi[0], midi[1], midi[2]);
-//    }
+    if((midi[0] & 0xf0) != 0x80){
+//      printf("%llu %02x %02x %02x\n", events[i].atNs, midi[0], midi[1], midi[2]);
+    }
     if((midi[0] & 0xf0) == 0x90 && midi[2] > 0){
       rememberNoteOn(midi[0] & 0x0f, midi[1]);
     }
@@ -438,7 +488,7 @@ void dispatchFrame(uint64_t fromNs, uint64_t toNs){
       packetList,
       PACKET_LIST_SIZE,
       packet, 
-      events[i].atNs + absoluteStartNs + FRAME_SIZE_NS,
+      events[i].atNs + absoluteSongStartNs + FRAME_SIZE_NS,
       midiSize,
       midi
     );
@@ -458,30 +508,39 @@ void dispatchFrame(uint64_t fromNs, uint64_t toNs){
 // 20ms, play 20ms of events, and sleep for ~20ms depending on overshot.
 // ASSUMPTION mach_absolute_time returns nanoseconds, that is num=denom=1
 void* sleepWakeAndDispatchFrame(){
-  uint64_t startNs = mach_absolute_time();
-  uint64_t playNs = startNs;
-  uint64_t currentNs = startNs;
-  uint64_t prevNs;
   uint64_t sleepTargetNs;
+  uint64_t currentNs;
 
-  absoluteStartNs = startNs;
+  currentNs = mach_absolute_time();
+  absolutePlayHeadNs = currentNs + FRAME_SIZE_NS;
+  absoluteLeadingEdgeNs = absolutePlayHeadNs + FRAME_SIZE_NS;
+  absoluteSongStartNs = currentNs - songNs;
 
   for(;;){
     if(playFlag == 0){
+      onlineSeekFlag = 0;
       killAll();
       return NULL;
     }
-    dispatchFrame(playNs - startNs, playNs + FRAME_SIZE_NS - startNs);
-    sleepTargetNs = playNs - currentNs;
-    usleep(sleepTargetNs / 1000);
-    playNs = playNs + FRAME_SIZE_NS;
-    prevNs = currentNs;
-    currentNs = mach_absolute_time();
-    /*fprintf(stderr, "dispatch frame [%llu, %llu) (slept %llu / %llu %.2f%%)\n",
-      playNs, playNs+FRAME_SIZE_NS, currentNs - prevNs, sleepTargetNs,
-      (currentNs - prevNs - sleepTargetNs)*100.0 / sleepTargetNs
+    if(onlineSeekFlag == 1){
+      killAll();
+      songNs = onlineSeekTargetNs;
+      absoluteSongStartNs = currentNs - songNs;
+      onlineSeekFlag = 0;
+    }
+    printf("%lf\n", getCurrentBeat());
+    dispatchFrame(songNs, songNs + FRAME_SIZE_NS);
+    /*fprintf(stderr, "dispatch frame [%llu, %llu) [%llu, %llu)\n",
+      songNs, songNs+FRAME_SIZE_NS,
+      absolutePlayHeadNs, absoluteLeadingEdgeNs
     );*/
-    if(currentNs > playNs){ // over sleep
+    sleepTargetNs = absolutePlayHeadNs - currentNs;
+    absolutePlayHeadNs += FRAME_SIZE_NS;
+    absoluteLeadingEdgeNs += FRAME_SIZE_NS;
+    songNs += FRAME_SIZE_NS; // looping wrapping...
+    usleep(sleepTargetNs / 1000);
+    currentNs = mach_absolute_time();
+    if(currentNs > absolutePlayHeadNs){ // over sleep
       fprintf(stderr, "SOUND over slept! game over man!\n");
       exit(-1);
     }
@@ -512,13 +571,15 @@ void joinDispatchThread(){
   }
 }
 
-
 void stdinWorker(){
   char buf[INBUF_SIZE];
   char command[INBUF_SIZE];
   char arg1[INBUF_SIZE];
   char arg2[INBUF_SIZE];
   int number;
+  int numerator;
+  int denominator;
+  int result;
 
   fgets(buf, INBUF_SIZE, stdin);
   if(ferror(stdin)){
@@ -530,14 +591,19 @@ void stdinWorker(){
     exit(0);
   }
 
-  fprintf(stderr, "SOUND i heard %s (%zu)\n", buf, strlen(buf));
+  buf[strlen(buf)-1] = 0;
 
-  sscanf(buf, "%s", command);
-  if(strcmp(command, "LOAD")==0){
-    sscanf(buf, "%s %s %s", command, arg1, arg2);
-    fprintf(stderr, "loading %s %s\n", arg1, arg2);
+  result = sscanf(buf, "%s", command);
+  if(result <= 0){
+    fprintf(stderr, "SOUND unrecognized command\n");
+  }
+  else if(strcmp(command, "LOAD")==0){
+    result = sscanf(buf, "%s %s %s", command, arg1, arg2);
+    if(result < 3){
+      fprintf(stderr, "** SOUND invalid LOAD command (%s)\n", buf);
+      exit(-1);
+    }
     loadData(arg1, arg2);
-    printf("done\n");
   }
   else if(strcmp(command, "PLAY")==0){
     if(playFlag == 0){
@@ -558,7 +624,17 @@ void stdinWorker(){
     }
   }
   else if(strcmp(command, "SEEK")==0){
-    // killall, set the seek flag and position
+    result = sscanf(buf, "%s %d %d/%d", command, &number, &numerator, &denominator);
+    if(result < 4){
+      result = sscanf(buf, "%s %d", command, &number);
+      if(result < 2){
+        fprintf(stderr, "** SOUND invalid SEEK command (%s)\n", buf);
+        return;
+      }
+      numerator = 0;
+      denominator = 1;
+    }
+    executeSeek(number, numerator, denominator);
   }
   else if(strcmp(command, "CRASH")==0){
     fprintf(stderr, "%d\n", 0 / (int)NULL);
@@ -585,13 +661,16 @@ void stdinWorker(){
     // disable the loop flag
   }
   else if(strcmp(command, "TICKS_PER_BEAT")==0){
-    sscanf(buf, "%s %d", command, &number);
-    fprintf(stderr, "set ticks per beat to %d\n", number);
+    result = sscanf(buf, "%s %d", command, &number);
+    if(result < 2){
+      fprintf(stderr, "** SOUND invalid TICKS_PER_BEAT command (%s)\n", buf);
+    }
     if(number <= 0){
       fprintf(stderr, "** SOUND ignoring setting ticks per beat to %d\n", number);
     }
     else{
       ticksPerBeat = number;
+      fprintf(stderr, "SOUND ticksPerBeat=%d\n", number);
       // set a recompute time flag?
     }
   }
@@ -599,8 +678,7 @@ void stdinWorker(){
     // set the new params and set the parameter change flag 
   }
   else if(strcmp(command, "TELL")==0){
-    fprintf(stderr, "something wants me to tell\n");
-    //printf("%d\n", currentPosition);
+    printf("%lf\n", getCurrentBeat());
   }
   else if(strcmp(command, "CAPTURE_ENABLE")==0){
     fprintf(stderr, "capture enable\n");
@@ -613,7 +691,7 @@ void stdinWorker(){
     printf("nothing to see here!\n");
   }
   else{
-    fprintf(stderr, "SOUND unrecognized request <%s>\n", buf);
+    fprintf(stderr, "SOUND unrecognized command (%s)\n", buf);
   }
 }
 
