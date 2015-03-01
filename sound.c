@@ -15,6 +15,7 @@
 #define INBUF_SIZE 1024
 #define PACKET_LIST_SIZE 4096
 #define DEFAULT_USPQ 500000 // 120 bpm
+#define GARBAGE_SIZE 32
 
 struct sequencerEvent {
   uint32_t tick;
@@ -28,6 +29,13 @@ struct tempoChange {
   uint32_t tick;
   uint64_t atNs;
   uint32_t uspq; // microseconds per quarter note
+};
+
+struct sequence {
+  int eventCount;
+  int tempoChangeCount;
+  struct sequencerEvent* events;
+  struct tempoChange* tempoChanges;
 };
 
 struct playingNote {
@@ -47,14 +55,6 @@ uint64_t absoluteLeadingEdgeNs;
 uint64_t absoluteSongStartNs;
 uint64_t songNs = 0;
 
-struct sequencerEvent* events;
-int eventCount;
-
-struct tempoChange* tempoChanges;
-int tempoChangeCount = 0;
-
-uint32_t ticksPerBeat = 384;
-
 int onlineSeekFlag = 0;
 uint64_t onlineSeekTargetNs;
 
@@ -65,7 +65,35 @@ uint64_t loopEndNs;
 double loopStartBeat;
 double loopEndBeat;
 
+uint32_t ticksPerBeat = 384;
+
+struct sequence* currentSequence = NULL;
+struct sequence* garbage[GARBAGE_SIZE];
+
+pthread_mutex_t garbageMutex;
+pthread_cond_t garbageSignal;
+
+void trashSequence(struct sequence* seq){
+  int i;
+  for(i=0; i<GARBAGE_SIZE; i++){
+    if(garbage[i] == NULL){
+      garbage[i] = seq;
+      return;
+    }
+  }
+
+  fprintf(stderr, "** SOUND garbage has piled up\n");
+  exit(-1);
+}
+
+void emptyTrash(){
+  pthread_cond_signal(&garbageSignal);
+}
+
 uint64_t beatToNs(double beat){
+  struct sequence* seqSnap = currentSequence;
+  struct tempoChange* tempoChanges = seqSnap->tempoChanges;
+  int tempoChangeCount = seqSnap->tempoChangeCount;
   uint32_t targetTick = beat * ticksPerBeat;
   uint32_t uspq;
   uint32_t baseTick;
@@ -96,6 +124,9 @@ void setLoopEndpoints(double loop0, double loop1){
 }
 
 double getCurrentBeat(){
+  struct sequence* seqSnap = currentSequence;
+  struct tempoChange* tempoChanges = seqSnap->tempoChanges;
+  int tempoChangeCount = seqSnap->tempoChangeCount;
   uint32_t uspq;
   uint32_t baseNs;
   uint64_t songNsSnap = songNs;
@@ -113,12 +144,15 @@ double getCurrentBeat(){
 }
 
 void executeSeek(int number, int numerator, int denominator){
+  struct sequence* seqSnap = currentSequence;
   double beat = number + (double)numerator / denominator;
   uint32_t targetTick = beat * ticksPerBeat;
   uint64_t targetNs;
   uint32_t uspq;
   uint32_t baseTick;
   int i;
+  struct tempoChange* tempoChanges = seqSnap->tempoChanges;
+  int tempoChangeCount = seqSnap -> tempoChangeCount;
   printf("execute seek %d %d %d\n", number, numerator, denominator);
   if(tempoChangeCount == 0 || targetTick < tempoChanges[i].tick){
     uspq = DEFAULT_USPQ;
@@ -150,6 +184,7 @@ void initPlayingNotes(){
     playingNotes[i].playing = 0;
   }
 }
+
 
 void rememberNoteOn(int channel, int note){
   int i;
@@ -220,8 +255,6 @@ void killAll(){
   playingCount = 0;
   MIDIReceived(outputPort, packetList);
 }
-
-
 
 
 
@@ -426,7 +459,6 @@ void recomputeEventTimes(
   uint32_t prevTick = 0;
   uint32_t deltaTicks;
   for(i=0, j=0; i < tempoCount; i++){
-    printf("i=%d j=%d prevtick=%u uspq=%u\n", i, j, prevTick, uspq);
     deltaTicks = tempoChanges[i].tick - prevTick;
     tempoChanges[i].atNs = prevNs + deltaTicks*1000.0*uspq / ticksPerBeat;
 
@@ -435,7 +467,6 @@ void recomputeEventTimes(
       if(j >= eventCount) break;
       deltaTicks = events[j].tick - prevTick;
       events[j].atNs = prevNs + deltaTicks*1000.0*uspq / ticksPerBeat;
-      printf("event %d tick=%u at %llu / %llu\n", j, events[j].tick, events[j].atNs, tempoChanges[i].atNs);
       if(events[j].atNs <= tempoChanges[i].atNs) j++;
       else break;
     }
@@ -449,16 +480,21 @@ void recomputeEventTimes(
     if(j >= eventCount) break;
     deltaTicks = events[j].tick - prevTick;
     events[j].atNs = prevNs + deltaTicks*1000.0*uspq / ticksPerBeat;
-    printf("event %d tick=%u at %llu / %llu\n", j, events[j].tick, events[j].atNs, tempoChanges[i].atNs);
     j++;
   }
 
 }
 
 // load raw sequence and tempo data from two files, then delete the files
-void loadData(char* sequencePath, char* tempoPath){
+struct sequence* loadData(char* sequencePath, char* tempoPath){
   FILE* tempoFile;
   FILE* sequenceFile;
+  struct sequencerEvent* events;
+  struct tempoChange* tempoChanges;
+  int eventCount;
+  int tempoChangeCount;
+  struct sequence* seq;
+
   tempoFile = fopen(tempoPath, "r");
   if(tempoFile == NULL){
     fprintf(stderr,
@@ -476,15 +512,26 @@ void loadData(char* sequencePath, char* tempoPath){
   }
   events = loadSequenceData(sequenceFile, &eventCount);
   fclose(sequenceFile);
-  //printf("voice events = %d\n", eventCount);
 
   recomputeEventTimes(events, eventCount, tempoChanges, tempoChangeCount, ticksPerBeat);
+
+  seq = malloc(sizeof(struct sequence));
+  if(seq == NULL){
+    fprintf(stderr, "** SOUND failed to malloc sequence\n");
+    exit(-3);
+  }
+  seq->eventCount = eventCount;
+  seq->tempoChangeCount = tempoChangeCount;
+  seq->events = events;
+  seq->tempoChanges = tempoChanges;
+  
+  return seq;
 }
 
 
 // execute midi events within the range fromNs to toNs where 0 is the start
 // of the song. should consider loop position to repeat parts indefinitely.
-void dispatchFrame(uint64_t fromNs, uint64_t toNs){
+void dispatchFrame(struct sequence* seq, uint64_t fromNs, uint64_t toNs){
   //fprintf(stderr, "[%llu, %llu)\n", fromNs, toNs);
   unsigned char packetListStorage[PACKET_LIST_SIZE];
   MIDIPacketList* packetList = (MIDIPacketList*) packetListStorage;
@@ -494,6 +541,9 @@ void dispatchFrame(uint64_t fromNs, uint64_t toNs){
   int i, j;
   int midiSize;
   int c = 0;
+
+  int eventCount = seq->eventCount;
+  struct sequencerEvent* events = seq->events;
 
   for(i=0; i<eventCount; i++){ // get to the first event in range
     if(events[i].atNs >= fromNs) break;
@@ -525,7 +575,7 @@ void dispatchFrame(uint64_t fromNs, uint64_t toNs){
       packetList,
       PACKET_LIST_SIZE,
       packet, 
-      events[i].atNs + absoluteSongStartNs + FRAME_SIZE_NS,
+      events[i].atNs + absoluteSongStartNs,
       midiSize,
       midi
     );
@@ -547,13 +597,22 @@ void dispatchFrame(uint64_t fromNs, uint64_t toNs){
 void* sleepWakeAndDispatchFrame(){
   uint64_t sleepTargetNs;
   uint64_t currentNs;
+  uint64_t overshot;
+  struct sequence* sequenceSnap;
+  struct sequence* sequenceSnapPrev = NULL;
 
   currentNs = mach_absolute_time();
-  absolutePlayHeadNs = currentNs + FRAME_SIZE_NS;
+  absolutePlayHeadNs = (currentNs-currentNs%FRAME_SIZE_NS) + FRAME_SIZE_NS;
   absoluteLeadingEdgeNs = absolutePlayHeadNs + FRAME_SIZE_NS;
-  absoluteSongStartNs = currentNs - songNs;
+  absoluteSongStartNs = absolutePlayHeadNs - songNs;
 
   for(;;){
+    sequenceSnap = currentSequence;
+    if(sequenceSnapPrev && sequenceSnapPrev != sequenceSnap){
+      trashSequence(sequenceSnapPrev);
+    }
+    sequenceSnapPrev = sequenceSnap;
+
     if(playFlag == 0){
       onlineSeekFlag = 0;
       killAll();
@@ -562,19 +621,46 @@ void* sleepWakeAndDispatchFrame(){
     if(onlineSeekFlag == 1){
       killAll();
       songNs = onlineSeekTargetNs;
-      absoluteSongStartNs = currentNs - songNs;
+      absolutePlayHeadNs = currentNs;
+      absoluteLeadingEdgeNs = absolutePlayHeadNs + FRAME_SIZE_NS;
+      absoluteSongStartNs = absolutePlayHeadNs - songNs;
       onlineSeekFlag = 0;
     }
-    printf("%lf\n", getCurrentBeat());
-    dispatchFrame(songNs, songNs + FRAME_SIZE_NS);
-    /*fprintf(stderr, "dispatch frame [%llu, %llu) [%llu, %llu)\n",
-      songNs, songNs+FRAME_SIZE_NS,
-      absolutePlayHeadNs, absoluteLeadingEdgeNs
-    );*/
+    if(loopFlag && songNs > loopEndNs){
+      killAll();
+      songNs = loopStartNs;
+      absolutePlayHeadNs = currentNs;
+      absoluteLeadingEdgeNs = absolutePlayHeadNs + FRAME_SIZE_NS;
+      absoluteSongStartNs = absolutePlayHeadNs - songNs;
+    }
+
+    if(loopFlag && songNs + FRAME_SIZE_NS > loopEndNs){
+      overshot = songNs + FRAME_SIZE_NS - loopEndNs;
+      dispatchFrame(sequenceSnap, songNs, loopEndNs + 1); 
+      /*fprintf(stderr, "dispatch frame [%llu, %llu] [%llu, %llu]\n",
+        songNs, loopEndNs,
+        absolutePlayHeadNs, absoluteLeadingEdgeNs
+      );*/
+      absolutePlayHeadNs += loopEndNs - songNs;
+      absoluteSongStartNs = absolutePlayHeadNs - loopStartNs;
+      dispatchFrame(sequenceSnap, loopStartNs, loopStartNs + overshot);
+      /*fprintf(stderr, "dispatch frame [%llu, %llu) [%llu, %llu)\n",
+        loopStartNs, loopStartNs + overshot,
+        absolutePlayHeadNs, absoluteLeadingEdgeNs
+      );*/
+      songNs = loopStartNs + overshot;
+    }
+    else{
+      dispatchFrame(sequenceSnap, songNs, songNs + FRAME_SIZE_NS);
+      /*fprintf(stderr, "dispatch frame [%llu, %llu) [%llu, %llu)\n",
+        songNs, songNs+FRAME_SIZE_NS,
+        absolutePlayHeadNs, absoluteLeadingEdgeNs
+      );*/
+      songNs += FRAME_SIZE_NS; // looping wrapping...
+    }
     sleepTargetNs = absolutePlayHeadNs - currentNs;
     absolutePlayHeadNs += FRAME_SIZE_NS;
     absoluteLeadingEdgeNs += FRAME_SIZE_NS;
-    songNs += FRAME_SIZE_NS; // looping wrapping...
     usleep(sleepTargetNs / 1000);
     currentNs = mach_absolute_time();
     if(currentNs > absolutePlayHeadNs){ // over sleep
@@ -605,6 +691,49 @@ void joinDispatchThread(){
       ret
     );
     exit(-1);
+  }
+}
+
+void interrupt(int unused){
+  fprintf(stderr, "** SOUND interrupted by signal\n");
+  if(playFlag == 1){
+    playFlag = 0;
+    joinDispatchThread();
+    usleep(100000);
+  }
+  exit(0);
+}
+
+
+
+
+
+void* garbageWorker(){
+  int i;
+  for(;;){
+    pthread_cond_wait(&garbageSignal, &garbageMutex);
+    for(i=0; i<GARBAGE_SIZE; i++){
+      if(garbage[i] != NULL){
+        free(garbage[i]->events);
+        free(garbage[i]->tempoChanges);
+        free(garbage[i]);
+        garbage[i] = NULL;
+      }
+    }
+  }
+}
+
+void spawnGarbageThread(){
+  pthread_t unused;
+  pthread_mutex_init(&garbageMutex, NULL);
+  pthread_cond_init(&garbageSignal, NULL);
+  pthread_create(&unused, NULL, garbageWorker, NULL);
+}
+
+void initGarbage(){
+  int i;
+  for(i=0; i<GARBAGE_SIZE; i++){
+    garbage[i] = NULL;
   }
 }
 
@@ -642,7 +771,8 @@ void stdinWorker(){
       fprintf(stderr, "** SOUND invalid LOAD command (%s)\n", buf);
       exit(-1);
     }
-    loadData(arg1, arg2);
+    currentSequence = loadData(arg1, arg2);
+    emptyTrash();
   }
   else if(strcmp(command, "PLAY")==0){
     if(playFlag == 0){
@@ -679,14 +809,10 @@ void stdinWorker(){
     fprintf(stderr, "%d\n", 0 / (int)NULL);
   }
   else if(strcmp(command, "EXIT")==0){
-    playFlag = 0;
-    joinDispatchThread();
-    usleep(100000);
-    //shutdownCoreMidi();
-    exit(0);
+    interrupt(0);
   }
   else if(strcmp(command, "CUT_ALL")==0){
-    killAll();
+    //killAll();
   }
   else if(strcmp(command, "SET_LOOP")==0){
     result = sscanf(buf, "%s %lf %lf", command, &loop0, &loop1);
@@ -743,14 +869,6 @@ void stdinWorker(){
   }
 }
 
-void interrupt(int unused){
-  fprintf(stderr, "** SOUND interrupted by signal\n");
-  playFlag = 0;
-  joinDispatchThread();
-  usleep(100000);
-  exit(0);
-}
-
 int main(int argc, char* argv[]){
   fprintf(stderr, "SOUND Hello World\n");
   
@@ -760,6 +878,8 @@ int main(int argc, char* argv[]){
   }
 
   initPlayingNotes();
+  initGarbage();
+  spawnGarbageThread();
 
   signal(SIGINT, interrupt);
 
