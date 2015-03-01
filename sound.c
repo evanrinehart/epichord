@@ -57,6 +57,7 @@ uint64_t songNs = 0;
 
 int onlineSeekFlag = 0;
 uint64_t onlineSeekTargetNs;
+int cutAllFlag = 0;
 
 int loopFlag = 0;
 int loopInitialized = 0;
@@ -117,10 +118,6 @@ void setLoopEndpoints(double loop0, double loop1){
   loopStartNs = beatToNs(loop0);
   loopEndNs = beatToNs(loop1);
   loopInitialized = 1;
-  printf("loopStartNs %llu\n", loopStartNs);
-  printf("loopEndNs %llu\n", loopEndNs);
-  printf("loopStartBeat %lf\n", loopStartBeat);
-  printf("loopEndBeat %lf\n", loopEndBeat);
 }
 
 double getCurrentBeat(){
@@ -153,7 +150,6 @@ void executeSeek(int number, int numerator, int denominator){
   int i;
   struct tempoChange* tempoChanges = seqSnap->tempoChanges;
   int tempoChangeCount = seqSnap -> tempoChangeCount;
-  printf("execute seek %d %d %d\n", number, numerator, denominator);
   if(tempoChangeCount == 0 || targetTick < tempoChanges[i].tick){
     uspq = DEFAULT_USPQ;
     baseTick = 0;
@@ -164,7 +160,6 @@ void executeSeek(int number, int numerator, int denominator){
     baseTick = tempoChanges[i].tick;
   }
   targetNs = (targetTick-baseTick)*1000.0*uspq/ticksPerBeat;
-  printf("targetNs = %llu\n", targetNs);
   if(playFlag == 0){
     songNs = targetNs;
   }
@@ -345,7 +340,7 @@ int setupCoreMidi(){
     &inputPort
   );
   if(status != noErr){
-    printf("error creating destination %d\n", status);
+    fprintf(stderr, "** SOUND error creating CoreMidi destination %d\n", status);
     exit(-1);
   }
 
@@ -360,7 +355,7 @@ int setupCoreMidi(){
     &outputPort
   );
   if(status != noErr){
-    printf("error creating source %d\n", status);
+    fprintf(stderr, "** SOUND error creating CoreMidi source %d\n", status);
     exit(-1);
   }
 
@@ -462,7 +457,6 @@ void recomputeEventTimes(
     deltaTicks = tempoChanges[i].tick - prevTick;
     tempoChanges[i].atNs = prevNs + deltaTicks*1000.0*uspq / ticksPerBeat;
 
-    printf("tempo at ns %llu\n", tempoChanges[i].atNs);
     for(;;){
       if(j >= eventCount) break;
       deltaTicks = events[j].tick - prevTick;
@@ -563,7 +557,7 @@ void dispatchFrame(struct sequence* seq, uint64_t fromNs, uint64_t toNs){
     midiSize = 3;
     if((midi[0] & 0xf0) == 0xc0 || (midi[0] & 0xf0) == 0xd0) midiSize = 2;
     if((midi[0] & 0xf0) != 0x80){
-//      printf("%llu %02x %02x %02x\n", events[i].atNs, midi[0], midi[1], midi[2]);
+      fprintf(stderr, "%llu %02x %02x %02x\n", events[i].atNs, midi[0], midi[1], midi[2]);
     }
     if((midi[0] & 0xf0) == 0x90 && midi[2] > 0){
       rememberNoteOn(midi[0] & 0x0f, midi[1]);
@@ -625,6 +619,10 @@ void* sleepWakeAndDispatchFrame(){
       absoluteLeadingEdgeNs = absolutePlayHeadNs + FRAME_SIZE_NS;
       absoluteSongStartNs = absolutePlayHeadNs - songNs;
       onlineSeekFlag = 0;
+    }
+    if(cutAllFlag){
+      killAll();
+      cutAllFlag = 0;
     }
     if(loopFlag && songNs > loopEndNs){
       killAll();
@@ -812,7 +810,13 @@ void stdinWorker(){
     interrupt(0);
   }
   else if(strcmp(command, "CUT_ALL")==0){
-    //killAll();
+    if(playFlag == 0){
+      killAll();
+    }
+    else{
+      cutAllFlag = 1;
+      usleep(FRAME_SIZE_NS/1000);
+    }
   }
   else if(strcmp(command, "SET_LOOP")==0){
     result = sscanf(buf, "%s %lf %lf", command, &loop0, &loop1);
@@ -843,16 +847,19 @@ void stdinWorker(){
       fprintf(stderr, "** SOUND ignoring setting ticks per beat to %d\n", number);
     }
     else{
-      ticksPerBeat = number;
-      fprintf(stderr, "SOUND ticksPerBeat=%d\n", number);
-      // set a recompute time flag?
+      if(playFlag){
+        fprintf(stderr, "SOUND not changing ticks per beat while playing\n");
+      }
+      else{
+        ticksPerBeat = number;
+      }
     }
   }
   else if(strcmp(command, "SET_PARAMETERS")==0){
     // set the new params and set the parameter change flag 
   }
   else if(strcmp(command, "TELL")==0){
-    printf("%lf\n", getCurrentBeat());
+    fprintf(stdout, "%lf\n", getCurrentBeat());
   }
   else if(strcmp(command, "CAPTURE_ENABLE")==0){
     fprintf(stderr, "capture enable\n");
@@ -862,7 +869,6 @@ void stdinWorker(){
   }
   else if(strcmp(command, "CAPTURE_DUMP")==0){
     fprintf(stderr, "dump capture buffer\n");
-    printf("nothing to see here!\n");
   }
   else{
     fprintf(stderr, "SOUND unrecognized command (%s)\n", buf);
