@@ -244,19 +244,29 @@ void showGraphics(){
 @implementation MyWindow
 
 - (void)mouseDown:theEvent {
-  NSLog(@"%@", theEvent);
+  fprintf(self.eventOut, "click %d\n", 0);
 }
 
 - (void)mouseUp:theEvent {
-  NSLog(@"%@", theEvent);
+  fprintf(self.eventOut, "release %d\n", 0);
 }
 
 - (void)rightMouseDown:theEvent {
-  NSLog(@"%@", theEvent);
+  fprintf(self.eventOut, "click %d\n", 1);
 }
 
 - (void)rightMouseUp:theEvent {
-  NSLog(@"%@", theEvent);
+  fprintf(self.eventOut, "release %d\n", 1);
+}
+
+- (void)otherMouseDown:theEvent {
+  int button = [theEvent buttonNumber];
+  fprintf(self.eventOut, "click %d\n", button);
+}
+
+- (void)otherMouseUp:theEvent {
+  int button = [theEvent buttonNumber];
+  fprintf(self.eventOut, "release %d\n", button);
 }
 
 - (void)mouseMoved:theEvent {
@@ -306,13 +316,22 @@ void showGraphics(){
   //NSLog(@"%@", theEvent);
 }
 
-- (void)scrollWheel:theEvent {
-  NSLog(@"%@", theEvent);
+- (void)scrollWheel:(NSEvent*)theEvent {
+  double dy = theEvent.deltaY;
+  fprintf(self.eventOut, "wheel %lf\n", dy);
 }
 
 - (void)display {
   fprintf(stdout, "WINDOW DISPLAY\n");
 }
+
+/* this would go in a window delegate which i didnt set up
+- (NSSize)windowWillResize:(NSWindow*)sender toSize:(NSSize)newSize {
+  printf("%lf %lf\n", newSize.width, newSize.height);
+  return newSize;
+}
+*/
+
 
 @end
 
@@ -344,7 +363,6 @@ void showGraphics(){
 @implementation MyMenuHandler
 - (void)quit:(id)sender {
   printf("QUIT\n");
-  exit(0);
 }
 
 - (void)about:(id)sender {
@@ -394,8 +412,9 @@ void showGraphics(){
 }
 
 - (void)windowResized:notif {
-  NSLog(@"%@", notif);
-  printf("window resized\n");
+  NSWindow* win = [notif object];
+  NSSize size = [[win contentView] frame].size;
+  fprintf(self.eventOut, "resize %d %d\n", (int)size.width, (int)size.height);
 }
 
 - (void)stdinReadable:notif {

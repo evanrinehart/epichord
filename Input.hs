@@ -22,7 +22,7 @@ data RawInput =
   KeyUp Key |
   Character Char |
   Resize Int Int |
-  Wheel Int |
+  Wheel Double |
   Confirm |
   FilePick FilePath |
   MenuNew |
@@ -33,7 +33,7 @@ data RawInput =
   MenuQuit
     deriving (Show, Eq, Ord)
 
-data MouseButton = MouseLeft | MouseRight | MouseMiddle
+newtype MouseButton = MouseButton Int
   deriving (Show, Eq, Ord)
 
 quickParse :: String -> Parser a -> Maybe a
@@ -72,14 +72,11 @@ keydown _ _ k = KeyDown k
 keyup _ _ k = KeyUp k
 character _ _ c = Character c
 resize _ _ w _ h = Resize (fromIntegral w) (fromIntegral h)
-wheel _ _ z = Wheel (fromIntegral z)
+wheel _ _ z = Wheel z
 filePick _ _ s = FilePick s
 
 button :: Parser MouseButton
-button = choice
-  [ MouseLeft <$ string "left"
-  , MouseRight <$ string "right"
-  , MouseMiddle <$ string "middle" ]
+button = (MouseButton . fromIntegral) <$> decimal
 
 key :: Parser Key
 key = do
@@ -115,11 +112,11 @@ parseInputLine line = quickParse line $ do
     , try $ click <$> string "click" <*> space <*> button
     , try $ Confirm <$ string "confirm"
     , try $ character <$> string "character" <*> space <*> charParser
-    , release <$> string "release" <*> space <*> button
+    , try $ release <$> string "release" <*> space <*> button
     , try $ keydown <$> string "keydown" <*> space <*> key
     , try $ keyup <$> string "keyup" <*> space <*> key
     , resize <$> string "resize" <*> space <*> decimal <*> space <*> decimal
-    , wheel <$> string "wheel" <*> space <*> decimal
+    , wheel <$> string "wheel" <*> space <*> float
     , filePick <$> string "filepick" <*> space <*> getInput
     , MenuNew <$ string "new"
     , MenuOpen <$ string "open"
