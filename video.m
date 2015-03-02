@@ -260,7 +260,9 @@ void showGraphics(){
 }
 
 - (void)mouseMoved:theEvent {
-  //NSLog(@"%@", theEvent);
+  id v = [self contentView];
+  NSPoint p = [v convertPoint:[theEvent locationInWindow] fromView:nil];
+  fprintf(self.eventOut, "mouse %lf %lf\n", p.x, p.y);
 }
 
 - (void)keyDown:theEvent {
