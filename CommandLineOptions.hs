@@ -1,15 +1,25 @@
 module CommandLineOptions where
 
+import System.IO
+import System.Posix
 import Options.Applicative
 import Data.Monoid
+import Data.Maybe
 
 data CommandLineOptions = CommandLineOptions
   { paintToFd :: Maybe Int
   , eventsFromFd :: Maybe Int }
     deriving (Show)
 
-parseCommandLineOptions :: IO CommandLineOptions
-parseCommandLineOptions = execParser (info (helper <*> optParser) description)
+parseCommandLineOptions :: IO (Handle, Handle)
+parseCommandLineOptions = do
+  CommandLineOptions p e <- parseRawCommandLineOptions
+  p' <- maybe (return stdout) (fdToHandle . Fd . fromIntegral) p
+  e' <- maybe (return stdin)  (fdToHandle . Fd . fromIntegral) e
+  return (p', e')
+
+parseRawCommandLineOptions :: IO CommandLineOptions
+parseRawCommandLineOptions = execParser (info (helper <*> optParser) description)
 
 description =
   progDesc "Epichord's core application program." <>

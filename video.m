@@ -6,6 +6,44 @@
 #import <unistd.h>
 #import <stdlib.h>
 
+int modifierDown(int code, uint64_t flags){
+  switch(code){
+    case kVK_Shift:        return (flags & NX_DEVICELSHIFTKEYMASK) ? 1 : 0;
+    case kVK_RightShift:   return (flags & NX_DEVICERSHIFTKEYMASK) ? 1 : 0;
+    case kVK_Command:      return (flags & NX_DEVICELCMDKEYMASK)   ? 1 : 0;
+    case 54:               return (flags & NX_DEVICERCMDKEYMASK)   ? 1 : 0;
+    case kVK_Control:      return (flags & NX_DEVICELCTLKEYMASK)   ? 1 : 0;
+    case kVK_RightControl: return (flags & NX_DEVICERCTLKEYMASK)   ? 1 : 0;
+    case kVK_Option:       return (flags & NX_DEVICELALTKEYMASK)   ? 1 : 0;
+    case kVK_RightOption:  return (flags & NX_DEVICERALTKEYMASK)   ? 1 : 0;
+    case kVK_CapsLock:     return (flags & NX_ALPHASHIFTMASK)      ? 1 : 0;
+    case kVK_Function:     return (flags & NX_SECONDARYFNMASK)     ? 1 : 0;
+    default:               return -1;
+  }
+  /*
+  #define	NX_ALPHASHIFTMASK	0x00010000
+  #define	NX_SHIFTMASK		0x00020000
+  #define	NX_CONTROLMASK		0x00040000
+  #define	NX_ALTERNATEMASK	0x00080000
+  #define	NX_COMMANDMASK		0x00100000
+  #define	NX_NUMERICPADMASK	0x00200000
+  #define	NX_HELPMASK		0x00400000
+  #define	NX_SECONDARYFNMASK	0x00800000
+  */
+
+  /* device-dependent (really?) */
+  /*
+  #define	NX_DEVICELCTLKEYMASK	0x00000001
+  #define	NX_DEVICELSHIFTKEYMASK	0x00000002
+  #define	NX_DEVICERSHIFTKEYMASK	0x00000004
+  #define	NX_DEVICELCMDKEYMASK	0x00000008
+  #define	NX_DEVICERCMDKEYMASK	0x00000010
+  #define	NX_DEVICELALTKEYMASK	0x00000020
+  #define	NX_DEVICERALTKEYMASK	0x00000040
+  #define NX_DEVICERCTLKEYMASK	0x00002000
+  */
+}
+
 const char* keycodeToString(int code){
   switch(code){
     case kVK_Escape: return "escape";
@@ -112,33 +150,26 @@ const char* keycodeToString(int code){
 
 
 void spawnCore(FILE** paintIn, FILE** eventOut){
-  int eventPipe[2]; //we write to 1
   int paintPipe[2]; //we read from 0
-  char* args[] = {"core", NULL};
+  int eventPipe[2]; //we write to 1
+  char buf1[10];
+  char buf2[10];
+  char* args[] = {"core", "-p", NULL, "-e", NULL, NULL};
   pid_t pid;
 
-  if(pipe(eventPipe) < 0){
-    fprintf(stderr, "VIDEO event pipe failed (%s)\n", strerror(errno));
-    exit(-1);
-  }
   if(pipe(paintPipe) < 0){
     fprintf(stderr, "VIDEO paint pipe failed (%s)\n", strerror(errno));
     exit(-1);
   }
+  if(pipe(eventPipe) < 0){
+    fprintf(stderr, "VIDEO event pipe failed (%s)\n", strerror(errno));
+    exit(-1);
+  }
 
-/*
-  write(eventPipe[1], "BOOYA\n", 6);
-  char buf[10];
-  buf[9] = 0;
-  if(read(eventPipe[0], buf, 6) < 0){
-    printf("WROGNGG %s\n", strerror(errno));
-    exit(-1);
-  }
-  else{
-    printf("READ WORKED! %s\n", buf);
-    exit(-1);
-  }
-*/
+  snprintf(buf1, 10, "%d", paintPipe[1]);
+  snprintf(buf2, 10, "%d", eventPipe[0]);
+  args[2] = buf1;
+  args[4] = buf2;
 
   pid = fork();
   if(pid == -1){
@@ -148,10 +179,6 @@ void spawnCore(FILE** paintIn, FILE** eventOut){
   else if(pid == 0){ // child 
     close(eventPipe[1]);
     close(paintPipe[0]);
-    close(0);
-    dup(eventPipe[0]); // we will read event commands from stdin
-    close(1);
-    dup(paintPipe[1]); // we will write paint commands to stdout
     execve("./core", args, NULL);
     fprintf(stderr, "LIMINAL VIDEO->CORE exec failed! %s\n", strerror(errno));
     exit(-1);
@@ -178,7 +205,6 @@ void spawnCore(FILE** paintIn, FILE** eventOut){
   }
 }
   
-
 void showGraphics(){
   CGContextRef context = [[NSGraphicsContext currentContext] graphicsPort];
   CGContextSetRGBFillColor(context, 1, 0, 0, 1);
@@ -217,19 +243,27 @@ void showGraphics(){
 
 - (void)keyDown:theEvent {
   CGKeyCode k = [theEvent keyCode];
-  //write(self.eventPipe, buf, strlen(buf));
-  //write(self.eventPipe, "BOOYA\n", 6);
-  printf("event out %p\n", self.eventOut);
-  fprintf(self.eventOut, "click left\n");
-  //[self flushWindow];
+  const char* name = keycodeToString(k);
+  if(name) fprintf(self.eventOut, "keydown %s\n", name);
+  else     fprintf(self.eventOut, "keydown unknown cocoa %u\n", k);
 }
 
 - (void)keyUp:theEvent {
-//  NSLog(@"%@", theEvent);
+  CGKeyCode k = [theEvent keyCode];
+  const char* name = keycodeToString(k);
+  if(name) fprintf(self.eventOut, "keyup %s\n", name);
+  else     fprintf(self.eventOut, "keyup unknown cocoa %u\n", k);
 }
 
 - (void)flagsChanged:theEvent {
-  NSLog(@"%@", theEvent);
+  CGKeyCode k = [theEvent keyCode];
+  const char* name = keycodeToString(k);
+  int down = modifierDown(k, [theEvent modifierFlags]);
+  if(name != NULL){
+    if(down == 1) fprintf(self.eventOut, "keydown %s\n", name);
+    if(down == 0) fprintf(self.eventOut, "keyup %s\n", name);
+  }
+  //NSLog(@"%@", theEvent);
 }
 
 - (void)scrollWheel:theEvent {
@@ -381,8 +415,8 @@ int main (int argc, const char * argv[])
 
   if(argc < 2){ // by default, spawn the core application
     spawnCore(&paintIn, &eventOut);
-    close(0);
-    dup(fileno(paintIn));
+    //close(0);
+    //dup(fileno(paintIn));
     //close(1);
     //dup(fileno(eventOut));
   }

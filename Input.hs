@@ -63,7 +63,7 @@ float = do
   return $ sign (whole + frac)
 
 
-mouse _ _ dx _ dy = Mouse dx dy
+mouse _ _ x _ y = Mouse x y
 click _ _ b = Click b
 release _ _ b = Release b
 keydown _ _ k = KeyDown k

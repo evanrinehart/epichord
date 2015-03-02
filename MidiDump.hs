@@ -131,3 +131,8 @@ encodeTempoEvent w = (B.pack . map fromIntegral)
   [ (w .&. 0xff0000) `shiftR` 16
   , (w .&. 0x00ff00) `shiftR` 8
   ,  w .&. 0x0000ff ]
+
+  --Right smf <- fmap canonical <$> readMidi "midis/windfis2.mid"
+--  print (mf_header smf)
+--  putAscii smf
+ -- dumpMidiFile "1234" "1234" smf
