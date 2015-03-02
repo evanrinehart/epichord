@@ -16,6 +16,7 @@ parseCommandLineOptions = do
   CommandLineOptions p e <- parseRawCommandLineOptions
   p' <- maybe (return stdout) (fdToHandle . Fd . fromIntegral) p
   e' <- maybe (return stdin)  (fdToHandle . Fd . fromIntegral) e
+  hSetEncoding e' utf8
   return (p', e')
 
 parseRawCommandLineOptions :: IO CommandLineOptions

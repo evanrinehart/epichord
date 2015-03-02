@@ -1,5 +1,6 @@
 module Input where
 
+import Debug.Trace (trace)
 import Text.Parsec
 import Text.Parsec.String
 import Control.Applicative hiding ((<|>))
@@ -8,6 +9,7 @@ import Control.Monad
 import Data.Ratio
 import Data.Map (Map)
 import qualified Data.Map as M
+import Data.Char
 
 import qualified Keys as K
 import Keys (Key)
@@ -82,34 +84,49 @@ button = choice
 key :: Parser Key
 key = do
   s <- getInput
+  string s
   case K.fromString s of
     Nothing -> fail "unknown key"
     Just k -> return k
 
+numericChar :: Parser Char
+numericChar = do
+  n <- decimal
+  if n <= 1114111
+    then return (chr (fromIntegral n))
+    else fail ("invalid character number " ++ show n)
+
+charParser :: Parser Char
+charParser = choice
+  [ try $ string "\\n" >> pure '\n'
+  , try $ string "\\r" >> pure '\r'
+  , try $ string "\\t" >> pure '\t'
+  , try $ string "\\f" >> pure '\f'
+  , try $ string "\\v" >> pure '\v'
+  , try $ string "\\b" >> pure '\b'
+  , try $ string "\\a" >> pure '\a'
+  , try $ char '\\' >> numericChar
+  , anyChar ]
+
 parseInputLine :: String -> Maybe RawInput
-parseInputLine line = quickParse line $ choice
-  [ mouse <$> string "mouse" <*> space <*> float <*> space <*> float
-  , try $ click <$> string "click" <*> space <*> button
-  , try $ Confirm <$ string "confirm"
-  , character <$> string "character" <*> space <*> anyChar
-  , release <$> string "release" <*> space <*> button
-  , try $ keydown <$> string "keydown" <*> space <*> key
-  , keyup <$> string "keyup" <*> space <*> key
-  , resize <$> string "resize" <*> space <*> decimal <*> space <*> decimal
-  , wheel <$> string "wheel" <*> space <*> decimal
-  , filePick <$> string "filepick" <*> space <*> getInput
-  , MenuNew <$ string "new"
-  , MenuOpen <$ string "open"
-  , try $ MenuSaveAs <$ string "save-as"
-  , MenuSave <$ string "save"
-  , MenuAbout <$ string "about"
-  , MenuQuit <$ string "quit" ]
-
-stdinReader :: (RawInput -> IO ()) -> IO a
-stdinReader eat = forever $ do
-  e <- parseInputLine <$> getLine
-  case e of
-    Nothing -> hPutStrLn stderr "CORE unrecognized input"
-    Just r -> hPutStrLn stderr (show r)
-
+parseInputLine line = quickParse line $ do
+  r <- choice
+    [ mouse <$> string "mouse" <*> space <*> float <*> space <*> float
+    , try $ click <$> string "click" <*> space <*> button
+    , try $ Confirm <$ string "confirm"
+    , try $ character <$> string "character" <*> space <*> charParser
+    , release <$> string "release" <*> space <*> button
+    , try $ keydown <$> string "keydown" <*> space <*> key
+    , try $ keyup <$> string "keyup" <*> space <*> key
+    , resize <$> string "resize" <*> space <*> decimal <*> space <*> decimal
+    , wheel <$> string "wheel" <*> space <*> decimal
+    , filePick <$> string "filepick" <*> space <*> getInput
+    , MenuNew <$ string "new"
+    , MenuOpen <$ string "open"
+    , try $ MenuSaveAs <$ string "save-as"
+    , MenuSave <$ string "save"
+    , MenuAbout <$ string "about"
+    , MenuQuit <$ string "quit" ]
+  eof
+  return r
 

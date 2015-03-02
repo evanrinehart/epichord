@@ -6,6 +6,28 @@
 #import <unistd.h>
 #import <stdlib.h>
 
+int notForCharacters(int code){
+  switch(code){
+    case kVK_F1: return 1;
+    case kVK_F2: return 1;
+    case kVK_F3: return 1;
+    case kVK_F4: return 1;
+    case kVK_F5: return 1;
+    case kVK_F6: return 1;
+    case kVK_F7: return 1;
+    case kVK_F8: return 1;
+    case kVK_F9: return 1;
+    case kVK_F10: return 1;
+    case kVK_F11: return 1;
+    case kVK_F12: return 1;
+    case kVK_LeftArrow: return 1;
+    case kVK_RightArrow: return 1;
+    case kVK_UpArrow: return 1;
+    case kVK_DownArrow: return 1;
+    default: return 0;
+  }
+}
+
 int modifierDown(int code, uint64_t flags){
   switch(code){
     case kVK_Shift:        return (flags & NX_DEVICELSHIFTKEYMASK) ? 1 : 0;
@@ -238,14 +260,30 @@ void showGraphics(){
 }
 
 - (void)mouseMoved:theEvent {
-  NSLog(@"%@", theEvent);
+  //NSLog(@"%@", theEvent);
 }
 
 - (void)keyDown:theEvent {
   CGKeyCode k = [theEvent keyCode];
   const char* name = keycodeToString(k);
-  if(name) fprintf(self.eventOut, "keydown %s\n", name);
-  else     fprintf(self.eventOut, "keydown unknown cocoa %u\n", k);
+  char c[16];
+
+  if(![theEvent isARepeat]){
+    if(name) fprintf(self.eventOut, "keydown %s\n", name);
+    else     fprintf(self.eventOut, "keydown unknown cocoa %u\n", k);
+  }
+
+  if([[theEvent characters] getCString:c maxLength:16 encoding:NSUTF8StringEncoding] == NO){
+    fprintf(stderr, "** VIDEO unable to encode character ");
+    NSLog(@"%@", [theEvent characters]);
+  }
+  else{
+    if(!notForCharacters(k) && strlen(c) > 0){
+      if(k == kVK_Return) fprintf(self.eventOut, "character \\n\n");
+      else if(k == kVK_Delete) fprintf(self.eventOut, "character \\b\n");
+      else fprintf(self.eventOut, "character %s\n", c);
+    }
+  }
 }
 
 - (void)keyUp:theEvent {
