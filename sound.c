@@ -316,11 +316,13 @@ void midiNotification(const MIDINotification* message, void* refCon){
 }
 
 void captureWorker(const MIDIPacketList* packetList, void* refCon, void* srcConn){
+  uint64_t now = mach_absolute_time();
   const MIDIPacket* packet = &packetList->packet[0];
   int i;
-  fprintf(stderr, "captureWorker\n");
+  fprintf(stderr, "captureWorker (%d packets)\n", packetList->numPackets);
   for(i=0; i<packetList->numPackets; i++){
-    printf("%llu %d: %x %d %d\n",
+    printf("%llu %llu %d: %x %d %d\n",
+      now,
       packet->timeStamp,
       packet->length,
       packet->data[0],
@@ -536,7 +538,7 @@ struct sequence* loadData(char* sequencePath, char* tempoPath){
   seq->tempoChangeCount = tempoChangeCount;
   seq->events = events;
   seq->tempoChanges = tempoChanges;
-
+/*
   if(unlink(sequencePath)){
     fprintf(stderr, "** SOUND failed to remove dump file (%s)\n", strerror(errno));
     exit(-1);
@@ -546,6 +548,7 @@ struct sequence* loadData(char* sequencePath, char* tempoPath){
     exit(-1);
   }
   
+*/
   return seq;
 }
 
@@ -759,6 +762,15 @@ void initGarbage(){
   }
 }
 
+void initNullSequence(){
+  struct sequence* seq = malloc(sizeof(struct sequence));
+  seq->eventCount = 0;
+  seq->tempoChangeCount = 0;
+  seq->events = NULL;
+  seq->tempoChanges = NULL;
+  currentSequence = seq;
+}
+
 
 void executeMidi(int type, int channel, int arg1, int arg2){
   uint64_t now = mach_absolute_time();
@@ -955,6 +967,7 @@ int main(int argc, char* argv[]){
     exit(-1);
   }
 
+  initNullSequence();
   initPlayingNotes();
   initGarbage();
   spawnGarbageThread();
