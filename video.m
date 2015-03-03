@@ -6,6 +6,8 @@
 #import <unistd.h>
 #import <stdlib.h>
 
+NSWindow* mainWindow = NULL;
+
 unsigned char* paintBuffer = NULL;
 size_t paintBufferSize = 0;
 int paintBufferPtr = 0;
@@ -15,11 +17,24 @@ void flushGraphics(){
   [context flushGraphics];
 }
 
+int clamp(int lower, int x, int upper){
+  if(x < lower) return lower;
+  else if(x > upper) return upper;
+  else return x;
+}
+
 void paintFilledBox(int x, int y, int w, int h, int r, int g, int b){
+  NSSize size = [[mainWindow contentView] frame].size;
   NSGraphicsContext* context = [NSGraphicsContext currentContext];
   CGContextRef port = [context graphicsPort];
+  int xx0 = clamp(0, x, size.width);
+  int yy0 = clamp(0, y, size.height);
+  int xx1 = clamp(0, x+w, size.width);
+  int yy1 = clamp(0, y+h, size.height);
+  int ww = xx1 - xx0;
+  int hh = yy1 - yy0;
   CGContextSetRGBFillColor(port, r/255.0, g/255.0, b/255.0, 1);
-  CGContextFillRect(port, CGRectMake (x, y, w, h));
+  CGContextFillRect(port, CGRectMake (xx0, yy0, ww, hh));
 }
 
 void executePaintCommand(){
@@ -27,7 +42,7 @@ void executePaintCommand(){
   int base;
   int results;
   int args[8];
-  printf("executing paint command\n");
+  //printf("executing paint command\n");
 
   paintBuffer[paintBufferPtr] = 0;
 
@@ -40,7 +55,7 @@ void executePaintCommand(){
   }
   base = strlen(command);
 
-  printf("command = %s\n", command);
+  //printf("command = %s\n", command);
 
   if(strcmp(command, "fill")==0){
     results = sscanf(
@@ -71,7 +86,7 @@ void executePaintCommand(){
 
 void appendToPaintBuffer(size_t count, const unsigned char* bytes){
   // count <= 256, buffer >= 1024, only doubling is needed when no room
-//  printf("append to buffer %lu %256s\n", count, (char*)bytes);
+  //printf("append to buffer %lu\n", count);
   if(paintBufferPtr + count >= paintBufferSize){
     printf("expanding paint buffer to %lu\n", paintBufferSize * 2);
     paintBuffer = realloc(paintBuffer, paintBufferSize * 2);
@@ -84,6 +99,7 @@ void appendToPaintBuffer(size_t count, const unsigned char* bytes){
 
   memcpy(paintBuffer+paintBufferPtr, bytes, count);
   paintBufferPtr += count;
+  //printf("paintBufferPtr = %d\n", paintBufferPtr);
 }
 
 void paintIn(size_t count, const unsigned char* bytes){
@@ -96,17 +112,22 @@ void paintIn(size_t count, const unsigned char* bytes){
     exit(-1);
   }
 
+  //printf("paintIn %lu\n", count);
+
   for(;;){
-    //printf("paint in i=%d j=%d\n", i, j);
     if(bytes[i] == '\n'){
+      //printf("newline found at i=%d (j=%d)\n", i, j);
       if(i-j > 0){
         appendToPaintBuffer(i-j, bytes+j);
         executePaintCommand();
       }
       i++;
       j=i;
+
+      if(i==count) return;
     }
-    else if(i == count){
+    else if(i == count-1){
+      //printf("no newline found i=%d j=%d\n", i, j);
       appendToPaintBuffer(i-j, bytes+j);
       return;
     }
@@ -299,7 +320,7 @@ const char* keycodeToString(int code){
 };
 
 
-void spawnCore(FILE** paintIn, FILE** eventOut){
+void spawnCore(NSFileHandle** paintIn, FILE** eventOut){
   int paintPipe[2]; //we read from 0
   int eventPipe[2]; //we write to 1
   char buf1[10];
@@ -347,11 +368,8 @@ void spawnCore(FILE** paintIn, FILE** eventOut){
       exit(-1);
     }
 
-    *paintIn = fdopen(paintPipe[0], "r");
-    if(*paintIn == NULL){
-      fprintf(stderr, "VIDEO can't fdopen event stream %s\n", strerror(errno));
-      exit(-1);
-    }
+
+    *paintIn = [[NSFileHandle alloc] initWithFileDescriptor:paintPipe[0]];
   }
 }
   
@@ -511,7 +529,7 @@ void spawnCore(FILE** paintIn, FILE** eventOut){
 
 
 @interface MyNotificationHandler : NSObject
-@property (assign) NSFileHandle* standardIn;
+@property (assign) NSFileHandle* paintIn;
 @property (assign) NSNotificationCenter* center;
 @property FILE* eventOut;
 
@@ -563,9 +581,9 @@ void dumpBytes(int n, const unsigned char* bytes){
 - (void)stdinReadable:(NSNotification*)notif {
   int i=0;
   NSFileHandle* fileHandle = [notif object];
-  printf("stdin readable ... \n");
+  //printf("stdin readable ... \n");
   NSData* data = fileHandle.availableData;
-  dumpBytes(data.length, data.bytes);
+  //dumpBytes(data.length, data.bytes);
   if(data.length == 0){
     fprintf(stderr, "VIDEO stdin stream has ended. Terminating.\n");
     exit(-1);
@@ -580,7 +598,7 @@ void dumpBytes(int n, const unsigned char* bytes){
       break;
     }
   }
-  [self.standardIn waitForDataInBackgroundAndNotify];
+  [self.paintIn waitForDataInBackgroundAndNotify];
 }
 
 
@@ -616,7 +634,7 @@ void dumpBytes(int n, const unsigned char* bytes){
 
 int main (int argc, const char * argv[])
 {
-  FILE* paintIn = stdin;
+  NSFileHandle* paintIn = [NSFileHandle fileHandleWithStandardInput];
   FILE* eventOut = stdout;
 
   fprintf(stderr, "VIDEO Hello World\n");
@@ -635,24 +653,24 @@ int main (int argc, const char * argv[])
   [NSApplication sharedApplication];
   [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
 
+
   //install delegate
   MyDelegate* delegate = [MyDelegate new];
   delegate.eventOut = eventOut;
   ((NSApplication*)NSApp).delegate = delegate;
 
   //install notification handlers
-  NSFileHandle* standardIn = [NSFileHandle fileHandleWithStandardInput];
   MyNotificationHandler* handler =
     [[MyNotificationHandler alloc] initWithEventOut:eventOut];
-  handler.standardIn = standardIn;
+  handler.paintIn = paintIn;
   handler.center = [NSNotificationCenter defaultCenter];
   handler.eventOut = eventOut;
-  [standardIn waitForDataInBackgroundAndNotify];
+  [paintIn waitForDataInBackgroundAndNotify];
   [handler.center
     addObserver:handler
     selector:@selector(stdinReadable:) 
     name:@"NSFileHandleDataAvailableNotification"
-    object:standardIn ];
+    object:paintIn ];
   [handler registerWindowClosing];
   [handler registerWindowUnminimize];
   [handler registerWindowResized];
@@ -692,6 +710,7 @@ int main (int argc, const char * argv[])
     backing:NSBackingStoreBuffered
     defer:NO
   ] autorelease];
+  mainWindow = window;
   window.eventOut = eventOut;
   [window setAcceptsMouseMovedEvents:YES];
   [window cascadeTopLeftFromPoint:NSMakePoint(20,20)];

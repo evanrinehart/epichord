@@ -13,7 +13,8 @@ whenJust Nothing  _ = return ()
 whenJust (Just x) f = f x >> return ()
 
 newPaintOut :: Handle -> IO (String -> IO ())
-newPaintOut h = return (\msg -> hPutStrLn h msg)
+newPaintOut h = return $ \msg -> do
+  hPutStrLn h msg
 
 handleEvents :: Handle -> (RawInput -> IO ()) -> IO ()
 handleEvents h eat = forever $ do
@@ -26,4 +27,11 @@ main = do
   (paintOutH, eventInH) <- parseCommandLineOptions
   putStrLn "CORE Hello World"
   paintOut <- newPaintOut paintOutH
-  handleEvents eventInH (putStrLn . show)
+  handleEvents eventInH $ \i -> do
+    case i of
+      Mouse x y -> do
+        paintOut $ unwords
+          ["fill", show $ floor(x-50), show $ floor(y-50), "100", "100",
+           "0", "255", "0"]
+        paintOut "flush"
+      _ -> return ()
