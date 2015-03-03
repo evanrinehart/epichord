@@ -460,10 +460,12 @@ void spawnCore(FILE** paintIn, FILE** eventOut){
 @end
 
 @interface MyWindowDelegate : NSObject <NSWindowDelegate>
+@property FILE* eventOut;
 @end
 
 @implementation MyWindowDelegate
 - (BOOL)windowShouldClose:(id)sender {
+  fprintf(self.eventOut, "quit\n");
   return NO;
 }
 @end
@@ -481,7 +483,7 @@ void spawnCore(FILE** paintIn, FILE** eventOut){
 }
 
 - (NSApplicationTerminateReply)applicationShouldTerminate:sender {
-  printf("application should terminate\n");
+  fprintf(self.eventOut, "quit\n");
   return NO;
 }
 
@@ -634,8 +636,9 @@ int main (int argc, const char * argv[])
   [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
 
   //install delegate
-  id delegate = [[MyDelegate alloc] initWithEventOut:eventOut];
-  ((NSApplication*)NSApp).delegate = [MyDelegate new];
+  MyDelegate* delegate = [MyDelegate new];
+  delegate.eventOut = eventOut;
+  ((NSApplication*)NSApp).delegate = delegate;
 
   //install notification handlers
   NSFileHandle* standardIn = [NSFileHandle fileHandleWithStandardInput];
@@ -682,6 +685,7 @@ int main (int argc, const char * argv[])
     
 
   MyWindowDelegate* windel = [MyWindowDelegate new];
+  windel.eventOut = eventOut;
   MyWindow* window = [[[MyWindow alloc] 
     initWithContentRect:NSMakeRect(0,0,640,480)
     styleMask:NSTitledWindowMask|NSClosableWindowMask|NSMiniaturizableWindowMask|NSResizableWindowMask

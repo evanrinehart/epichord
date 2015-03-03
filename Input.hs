@@ -30,7 +30,7 @@ data RawInput =
   MenuSave |
   MenuSaveAs |
   MenuAbout |
-  MenuQuit
+  Quit
     deriving (Show, Eq, Ord)
 
 newtype MouseButton = MouseButton Int
@@ -123,7 +123,7 @@ parseInputLine line = quickParse line $ do
     , try $ MenuSaveAs <$ string "save-as"
     , MenuSave <$ string "save"
     , MenuAbout <$ string "about"
-    , MenuQuit <$ string "quit" ]
+    , Quit <$ string "quit" ]
   eof
   return r
 
