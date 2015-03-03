@@ -1,2 +1,5 @@
 arc
 .trash
+*.o
+*.hi
+bin
