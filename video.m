@@ -6,8 +6,136 @@
 #import <unistd.h>
 #import <stdlib.h>
 
-int notForCharacters(int code){
-  switch(code){
+unsigned char* paintBuffer = NULL;
+size_t paintBufferSize = 0;
+int paintBufferPtr = 0;
+
+void flushGraphics(){
+  NSGraphicsContext* context = [NSGraphicsContext currentContext];
+  [context flushGraphics];
+}
+
+void paintFilledBox(int x, int y, int w, int h, int r, int g, int b){
+  NSGraphicsContext* context = [NSGraphicsContext currentContext];
+  CGContextRef port = [context graphicsPort];
+  CGContextSetRGBFillColor(port, r/255.0, g/255.0, b/255.0, 1);
+  CGContextFillRect(port, CGRectMake (x, y, w, h));
+}
+
+void executePaintCommand(){
+  char command[32];
+  int base;
+  int results;
+  int args[8];
+  printf("executing paint command\n");
+
+  paintBuffer[paintBufferPtr] = 0;
+
+  results = sscanf((char*)paintBuffer, "%31s", command);
+  if(results < 1){
+    fprintf(stderr,
+      "** VIDEO failed to parse command (%31s)\n", (char*)paintBuffer);
+    paintBufferPtr = 0;
+    return;
+  }
+  base = strlen(command);
+
+  printf("command = %s\n", command);
+
+  if(strcmp(command, "fill")==0){
+    results = sscanf(
+      (char*)paintBuffer+base, "%d %d %d %d %d %d %d",
+      &args[0], &args[1], &args[2], &args[3], &args[4], &args[5], &args[6]
+    );
+    if(results < 7){
+      fprintf(stderr, "** VIDEO invalid fill command\n");
+      paintBufferPtr = 0;
+      return;
+    }
+    else{
+      paintFilledBox(
+        args[0], args[1], args[2], args[3],
+        args[4], args[5], args[6]
+      );
+    }
+  }
+  else if(strcmp(command, "flush")==0){
+    flushGraphics();
+  }
+  else{
+    fprintf(stderr, "VIDEO unknown paint command %s\n", command);
+  }
+
+  paintBufferPtr = 0;
+}
+
+void appendToPaintBuffer(size_t count, const unsigned char* bytes){
+  // count <= 256, buffer >= 1024, only doubling is needed when no room
+//  printf("append to buffer %lu %256s\n", count, (char*)bytes);
+  if(paintBufferPtr + count >= paintBufferSize){
+    printf("expanding paint buffer to %lu\n", paintBufferSize * 2);
+    paintBuffer = realloc(paintBuffer, paintBufferSize * 2);
+    if(paintBuffer == NULL){
+      fprintf(stderr, "** VIDEO failed to expand paint buffer\n");
+      exit(-2);
+    }
+    paintBufferSize *= 2;
+  }
+
+  memcpy(paintBuffer+paintBufferPtr, bytes, count);
+  paintBufferPtr += count;
+}
+
+void paintIn(size_t count, const unsigned char* bytes){
+
+  int i = 0;
+  int j = 0;
+
+  if(count == 0){
+    fprintf(stderr, "** VIDEO paintIn zero bug\n");
+    exit(-1);
+  }
+
+  for(;;){
+    //printf("paint in i=%d j=%d\n", i, j);
+    if(bytes[i] == '\n'){
+      if(i-j > 0){
+        appendToPaintBuffer(i-j, bytes+j);
+        executePaintCommand();
+      }
+      i++;
+      j=i;
+    }
+    else if(i == count){
+      appendToPaintBuffer(i-j, bytes+j);
+      return;
+    }
+    else{
+      i++;
+    }
+  }
+}
+
+
+void initializePaintBuffer(){
+  paintBuffer = malloc(1024);
+  paintBufferSize = 1024;
+}
+
+
+/*
+void showGraphics(){
+  CGContextRef context = [[NSGraphicsContext currentContext] graphicsPort];
+  CGContextSetRGBFillColor(context, 1, 0, 0, 1);
+  CGContextFillRect(context, CGRectMake (0, 0, 200, 100 ));
+  CGContextSetRGBFillColor(context, 0, 0, 1, .5);
+  CGContextFillRect(context, CGRectMake (0, 0, 100, 200));
+}
+*/
+
+
+int notForCharacters(int keycode){
+  switch(keycode){
     case kVK_F1: return 1;
     case kVK_F2: return 1;
     case kVK_F3: return 1;
@@ -227,14 +355,6 @@ void spawnCore(FILE** paintIn, FILE** eventOut){
   }
 }
   
-void showGraphics(){
-  CGContextRef context = [[NSGraphicsContext currentContext] graphicsPort];
-  CGContextSetRGBFillColor(context, 1, 0, 0, 1);
-  CGContextFillRect(context, CGRectMake (0, 0, 200, 100 ));
-  CGContextSetRGBFillColor(context, 0, 0, 1, .5);
-  CGContextFillRect(context, CGRectMake (0, 0, 100, 200));
-}
-
 @interface MyWindow : NSWindow
 
 @property FILE* eventOut;
@@ -242,6 +362,10 @@ void showGraphics(){
 @end
 
 @implementation MyWindow
+
+- (bool)windowShouldClose {
+  return NO;
+}
 
 - (void)mouseDown:theEvent {
   fprintf(self.eventOut, "click %d\n", 0);
@@ -335,6 +459,15 @@ void showGraphics(){
 
 @end
 
+@interface MyWindowDelegate : NSObject <NSWindowDelegate>
+@end
+
+@implementation MyWindowDelegate
+- (BOOL)windowShouldClose:(id)sender {
+  return NO;
+}
+@end
+
 @interface MyDelegate : NSObject <NSApplicationDelegate>
 @property FILE* eventOut;
 - (id)initWithEventOut:(FILE*)eventOut;
@@ -349,7 +482,7 @@ void showGraphics(){
 
 - (NSApplicationTerminateReply)applicationShouldTerminate:sender {
   printf("application should terminate\n");
-  return YES;
+  return NO;
 }
 
 @end
@@ -392,6 +525,14 @@ void showGraphics(){
 - (void)registerWindowUnminimize;
 @end
 
+void dumpBytes(int n, const unsigned char* bytes){
+  int i;
+  for(i=0; i<n; i++){
+    printf("%02x ", bytes[i]);
+  }
+  printf("\n");
+}
+
 @implementation MyNotificationHandler
 
 - (id)initWithEventOut:(FILE*)eventOut {
@@ -403,7 +544,7 @@ void showGraphics(){
   NSLog(@"%@", notif);
   printf("window is about to close\n");
   printf("VIDEO \"GAME OVER MAN\"\n");
-  exit(0);
+  //exit(0);
 }
 
 - (void)windowUnminimize:notif {
@@ -417,25 +558,31 @@ void showGraphics(){
   fprintf(self.eventOut, "resize %d %d\n", (int)size.width, (int)size.height);
 }
 
-- (void)stdinReadable:notif {
-  NSLog(@"%@", notif);
-  printf("stdin readable\n");
-  NSData* data = self.standardIn.availableData;
+- (void)stdinReadable:(NSNotification*)notif {
+  int i=0;
+  NSFileHandle* fileHandle = [notif object];
+  printf("stdin readable ... \n");
+  NSData* data = fileHandle.availableData;
+  dumpBytes(data.length, data.bytes);
   if(data.length == 0){
     fprintf(stderr, "VIDEO stdin stream has ended. Terminating.\n");
     exit(-1);
   }
-  NSLog(@"contents: %@", data.description);
-  [self registerStdinReadable];
+  for(;;){
+    if(data.length - i > 256){
+      paintIn(256, data.bytes+i);
+      i += 256;
+    }
+    else{
+      paintIn(data.length - i, data.bytes+i);
+      break;
+    }
+  }
+  [self.standardIn waitForDataInBackgroundAndNotify];
 }
 
+
 - (void)registerStdinReadable {
-  [self.standardIn waitForDataInBackgroundAndNotify];
-  [self.center
-    addObserver:self
-    selector:@selector(stdinReadable:) 
-    name:@"NSFileHandleDataAvailableNotification"
-    object:nil ];
 }
 
 - (void)registerWindowClosing {
@@ -472,6 +619,8 @@ int main (int argc, const char * argv[])
 
   fprintf(stderr, "VIDEO Hello World\n");
 
+  initializePaintBuffer();
+
   if(argc < 2){ // by default, spawn the core application
     spawnCore(&paintIn, &eventOut);
     //close(0);
@@ -489,13 +638,18 @@ int main (int argc, const char * argv[])
   ((NSApplication*)NSApp).delegate = [MyDelegate new];
 
   //install notification handlers
-  id standardIn = [NSFileHandle fileHandleWithStandardInput];
+  NSFileHandle* standardIn = [NSFileHandle fileHandleWithStandardInput];
   MyNotificationHandler* handler =
     [[MyNotificationHandler alloc] initWithEventOut:eventOut];
   handler.standardIn = standardIn;
   handler.center = [NSNotificationCenter defaultCenter];
   handler.eventOut = eventOut;
-  [handler registerStdinReadable];
+  [standardIn waitForDataInBackgroundAndNotify];
+  [handler.center
+    addObserver:handler
+    selector:@selector(stdinReadable:) 
+    name:@"NSFileHandleDataAvailableNotification"
+    object:standardIn ];
   [handler registerWindowClosing];
   [handler registerWindowUnminimize];
   [handler registerWindowResized];
@@ -527,6 +681,7 @@ int main (int argc, const char * argv[])
   [otherMenuItem setMenu:appMenu];
     
 
+  MyWindowDelegate* windel = [MyWindowDelegate new];
   MyWindow* window = [[[MyWindow alloc] 
     initWithContentRect:NSMakeRect(0,0,640,480)
     styleMask:NSTitledWindowMask|NSClosableWindowMask|NSMiniaturizableWindowMask|NSResizableWindowMask
@@ -538,8 +693,8 @@ int main (int argc, const char * argv[])
   [window cascadeTopLeftFromPoint:NSMakePoint(20,20)];
   [window setTitle:appName];
   [window makeKeyAndOrderFront:nil];
+  [window setDelegate:windel];
   [NSApp activateIgnoringOtherApps:YES];
-  showGraphics();
   [NSApp run];
   return 0;
    //NSLog (@"Hello world. Arguments: %@", [[NSProcessInfo processInfo] arguments]);

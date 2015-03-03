@@ -1,0 +1,10 @@
+fill x y w h r g b
+box
+line
+blit
+upload
+image
+text
+text-query
+cursor
+file-picker

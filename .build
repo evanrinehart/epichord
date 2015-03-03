@@ -1,4 +1,4 @@
 ghc -o core Core.hs
 gcc -o sound -framework Foundation -framework CoreMidi sound.c
-gcc -o Epichord -framework Foundation -framework AppKit video.m
+gcc -g -o Epichord -framework Foundation -framework AppKit video.m
 
