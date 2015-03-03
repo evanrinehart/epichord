@@ -1,4 +1,4 @@
-module CommandLineOptions where
+module Config where
 
 import System.IO
 import System.Posix
