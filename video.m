@@ -23,6 +23,9 @@ int clamp(int lower, int x, int upper){
   else return x;
 }
 
+void paintBox(int x, int y, int w, int h, int r, int g, int b){
+}
+
 void paintFilledBox(int x, int y, int w, int h, int r, int g, int b){
   NSSize size = [[mainWindow contentView] frame].size;
   NSGraphicsContext* context = [NSGraphicsContext currentContext];

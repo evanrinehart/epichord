@@ -6,7 +6,7 @@ import Control.Exception
 import Control.Monad
 
 import Input
-import CommandLineOptions
+import Config
 
 whenJust :: Maybe a -> (a -> IO b) -> IO ()
 whenJust Nothing  _ = return ()
@@ -34,4 +34,4 @@ main = do
           ["fill", show $ floor(x-50), show $ floor(y-50), "100", "100",
            "0", "255", "0"]
         paintOut "flush"
-      _ -> return ()
+      _ -> print i
