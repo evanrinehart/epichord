@@ -29,13 +29,13 @@ void paintFilledBox(int x, int y, int w, int h, int r, int g, int b){
   NSGraphicsContext* context = [NSGraphicsContext currentContext];
   CGContextRef port = [context graphicsPort];
   int xx0 = clamp(0, x, size.width);
-  int yy0 = clamp(0, size.height-y+h, size.height);
   int xx1 = clamp(0, x+w, size.width);
-  int yy1 = clamp(0, size.height-y, size.height);
   int ww = xx1 - xx0;
+  int yy0 = clamp(0, y, size.height);
+  int yy1 = clamp(0, y+h, size.height);
   int hh = yy1 - yy0;
   CGContextSetRGBFillColor(port, r/255.0, g/255.0, b/255.0, 1);
-  CGContextFillRect(port, CGRectMake (xx0, yy1, ww, hh));
+  CGContextFillRect(port, CGRectMake (xx0, size.height-yy0, ww, -hh));
 }
 
 void executePaintCommand(){

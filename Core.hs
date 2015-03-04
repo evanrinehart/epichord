@@ -13,19 +13,22 @@ import XVar
 import Tracker
 import Button
 import StateMachine
+import Chart
+import Rect
 
 main = do
   (paintOutH, eventInH) <- parseCommandLineOptions
   putStrLn "CORE Hello World"
-  let paintOut = newPaintOut paintOutH
-  let rpb = repaintButton paintOut
-  button <- newButton paintOut buttonLook (putStrLn "BOOYA")
+  let paint = newPaintOut paintOutH
+  let newButton = makeNewButton paint
+  button <- newButton buttonLook (putStrLn "BOOYA")
   character <- newXVar (\c -> return ())
   windowSize <- newXVar (\(w,h) -> return ())
   transfer <- newXVar $ \t -> case t of
     Transfer 1 _ -> writeXVar button Out
     Transfer _ 1 -> writeXVar button In
-  (_, position) <- newMouseTracker (0,0) chart transfer
+  (_, position) <- newMouseTracker (0,0)
+    (rect (Rect 0 0 100 100) 1) 0 transfer
   handleEvents eventInH $ \i -> do
     case i of
       Mouse x y -> writeXVar position (x,y)
@@ -42,15 +45,14 @@ keepAlive paint = forever $ do
   threadDelay 10000000
   paint []
 
-repaintButton :: ([Paint] -> IO ()) -> UpDown -> IO ()
-repaintButton paint ud = paint (buttonLook ud)
-
 buttonLook :: UpDown -> [Paint]
 buttonLook ud = case ud of
-  Up   -> [Fill (Rect (floor 150-50) (floor 150-50) 100 100) (0,255,0)]
-  Down -> [Fill (Rect (floor 150-50) (floor 150-50) 100 100) (255,0,0)]
+  Up   -> [Fill (Rect 0 0 100 100) (0,255,0)]
+  Down -> [Fill (Rect 0 0 100 100) (0,0,255)]
 
-newButton :: ([Paint] -> IO ())
-          -> (UpDown -> [Paint]) -> IO () -> IO (XVar MouseActivity)
-newButton paint look go =
-  newStateMachine (buttonSM (repaintButton paint) go) OutUp
+makeNewButton :: Painter
+              -> (UpDown -> [Paint])
+              -> IO ()
+              -> IO (XVar MouseActivity)
+makeNewButton paint look go =
+  newStateMachine (buttonSM (paint . look) go) OutUp

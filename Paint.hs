@@ -19,26 +19,21 @@ import qualified Data.Vector.Storable as V
 import Data.Word
 import Codec.Picture
 
+import Rect
+import R2
+
 type Color  = (Int,Int,Int)
 type Pixmap = Image PixelRGB8
-
-data Rect = Rect
- { rectLeft   :: Int
- , rectTop :: Int
- , rectWidth  :: Int
- , rectHeight :: Int }
-   deriving (Show)
-
-data XY = XY Int Int deriving Show
+type Painter = [Paint] -> IO ()
 
 data Paint =
-  Fill Rect Color |
-  Box Rect Color |
-  Line XY XY Color |
-  Blit XY Pixmap |
+  Fill (Rect Int) Color |
+  Box (Rect Int) Color |
+  Line N2 N2 Color |
+  Blit N2 Pixmap |
   Upload Int Pixmap |
-  PutImage XY Int |
-  Label XY Text |
+  PutImage N2 Int |
+  Label N2 Text |
   FilePicker |
   Copy Text |
   SetCursor Cursor
@@ -117,13 +112,13 @@ sp2nl x = x
 encodePaintCommand :: Paint -> Builder
 encodePaintCommand p = mconcat (intersperse space words) where
   words = case p of
-    Line (XY x y) (XY u v) (r,g,b) -> "line" : map intDec [x,y,u,v,r,g,b]
+    Line (x,y) (u,v) (r,g,b) -> "line" : map intDec [x,y,u,v,r,g,b]
     Fill (Rect x y w h) (r,g,b)    -> "fill" : map intDec [x,y,w,h,r,g,h]
     Box (Rect x y w h) (r,g,b)     -> "box"  : map intDec [x,y,w,h,r,g,h]
-    Blit (XY x y) img -> ["blit", intDec x, intDec y, encodePixmap img]
+    Blit (x,y) img -> ["blit", intDec x, intDec y, encodePixmap img]
     Upload n img -> ["upload", intDec n, encodePixmap img]
-    PutImage (XY x y) n -> ["image", intDec x, intDec y, intDec n]
-    Label (XY x y) s ->
+    PutImage (x,y) n -> ["image", intDec x, intDec y, intDec n]
+    Label (x,y) s ->
       ["label", intDec x, intDec y, byteString . encodeUtf8 . T.map sp2nl $ s]
     FilePicker -> ["file-picker"]
     Copy s -> ["copy", byteString (encodeUtf8 s)]
@@ -136,3 +131,14 @@ compilePaintCommands ps =
 
 newPaintOut :: Handle -> [Paint] -> IO ()
 newPaintOut h = hPutBuilder h . compilePaintCommands
+
+translatePaint :: Paint -> N2 -> Paint
+translatePaint p delta = case p of
+  Fill r c -> Fill (r `translateRect` delta) c
+  Box r c -> Box (r `translateRect` delta) c
+  Line x0 x1 c -> Line (x0 .+. delta) (x1 .+. delta) c
+  Blit x pix -> Blit (x .+. delta) pix
+  PutImage x n -> PutImage (x .+. delta) n
+  Label x t -> Label (x .+. delta) t
+  other -> other
+
