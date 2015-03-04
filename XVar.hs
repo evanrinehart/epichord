@@ -16,8 +16,16 @@ type XVar a = MVar (a -> IO ())
 -- because its currently an MVar, writing to it during the effect of writing
 -- to it will cause a deadlock.
 
+newXVar :: (a -> IO ()) -> IO (XVar a)
+newXVar act = newMVar act
+
 writeXVar :: XVar a -> a -> IO ()
-writeXVar xv x = withMVar xv (\act -> act x)
+writeXVar xv x = do
+  forkIO $ withMVar xv (\act -> act x)
+  return ()
 
 changeXVarEffect :: XVar a -> (a -> IO ()) -> IO ()
-changeXVarEffect xv act = modifyMVar_ xv (const act)
+changeXVarEffect xv act = do
+  forkIO $ modifyMVar_ xv (\_ -> return act)
+  return ()
+

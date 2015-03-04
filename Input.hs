@@ -127,3 +127,9 @@ parseInputLine line = quickParse line $ do
   eof
   return r
 
+handleEvents :: Handle -> (RawInput -> IO ()) -> IO ()
+handleEvents h eat = forever $ do
+  line <- hGetLine h
+  case parseInputLine line of
+    Nothing -> hPutStrLn stderr ("** CORE unrecognized input " ++ line)
+    Just r -> eat r

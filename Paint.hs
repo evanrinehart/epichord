@@ -134,5 +134,5 @@ compilePaintCommands ps =
   let encode p = encodePaintCommand p <> newline <> "flush\n" in
   mconcat (map encode ps) 
 
-newPaintOut :: Handle -> IO ([Paint] -> IO ())
-newPaintOut h = return (hPutBuilder h . compilePaintCommands)
+newPaintOut :: Handle -> [Paint] -> IO ()
+newPaintOut h = hPutBuilder h . compilePaintCommands

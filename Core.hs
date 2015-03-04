@@ -8,25 +8,17 @@ import System.Exit
 import Input
 import Config
 import Paint
-
-whenJust :: Maybe a -> (a -> IO b) -> IO ()
-whenJust Nothing  _ = return ()
-whenJust (Just x) f = f x >> return ()
-
-handleEvents :: Handle -> (RawInput -> IO ()) -> IO ()
-handleEvents h eat = forever $ do
-  line <- hGetLine h
-  case parseInputLine line of
-    Nothing -> hPutStrLn stderr ("** CORE unrecognized input " ++ line)
-    Just r -> eat r
+import XVar
 
 main = do
   (paintOutH, eventInH) <- parseCommandLineOptions
   putStrLn "CORE Hello World"
-  paintOut <- newPaintOut paintOutH
+  let paintOut = newPaintOut paintOutH
+  mouse <- newXVar $ \(x,y) ->
+    paintOut [Fill (Rect (floor x-50) (floor y-50) 100 100) (0,255,0)]
   handleEvents eventInH $ \i -> do
     case i of
-      Mouse x y -> paintOut
-        [Fill (Rect (floor x-50) (floor y-50) 100 100) (0,255,0)]
+      Mouse x y -> writeXVar mouse (x,y)
+      KeyDown k -> print k
       Quit -> exitSuccess
-      _ -> print i
+      _ -> return ()
