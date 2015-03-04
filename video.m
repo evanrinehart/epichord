@@ -412,13 +412,29 @@ void spawnCore(NSFileHandle** paintIn, FILE** eventOut){
   fprintf(self.eventOut, "release %d\n", button);
 }
 
-- (void)mouseMoved:theEvent {
+- (void)commonMouseMoved:theEvent {
   id v = [self contentView];
   NSSize size = [v frame].size;
   NSPoint p = [v convertPoint:[theEvent locationInWindow] fromView:nil];
   double mouseX = p.x;
   double mouseY = size.height - p.y;
   fprintf(self.eventOut, "mouse %lf %lf\n", mouseX, mouseY);
+}
+
+- (void)mouseMoved:theEvent {
+  [self commonMouseMoved:theEvent];
+}
+
+- (void)mouseDragged:theEvent {
+  [self commonMouseMoved:theEvent];
+}
+
+- (void)rightMouseDragged:theEvent {
+  [self commonMouseMoved:theEvent];
+}
+
+- (void)otherMouseDragged:theEvent {
+  [self commonMouseMoved:theEvent];
 }
 
 - (void)keyDown:theEvent {
