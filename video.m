@@ -1,5 +1,3 @@
-// First program example
-
 #import <Cocoa/Cocoa.h>
 #import <Carbon/Carbon.h>
 #import <stdio.h>
@@ -31,13 +29,13 @@ void paintFilledBox(int x, int y, int w, int h, int r, int g, int b){
   NSGraphicsContext* context = [NSGraphicsContext currentContext];
   CGContextRef port = [context graphicsPort];
   int xx0 = clamp(0, x, size.width);
-  int yy0 = clamp(0, y, size.height);
+  int yy0 = clamp(0, size.height-y+h, size.height);
   int xx1 = clamp(0, x+w, size.width);
-  int yy1 = clamp(0, y+h, size.height);
+  int yy1 = clamp(0, size.height-y, size.height);
   int ww = xx1 - xx0;
   int hh = yy1 - yy0;
   CGContextSetRGBFillColor(port, r/255.0, g/255.0, b/255.0, 1);
-  CGContextFillRect(port, CGRectMake (xx0, yy0, ww, hh));
+  CGContextFillRect(port, CGRectMake (xx0, yy1, ww, hh));
 }
 
 void executePaintCommand(){
@@ -416,8 +414,11 @@ void spawnCore(NSFileHandle** paintIn, FILE** eventOut){
 
 - (void)mouseMoved:theEvent {
   id v = [self contentView];
+  NSSize size = [v frame].size;
   NSPoint p = [v convertPoint:[theEvent locationInWindow] fromView:nil];
-  fprintf(self.eventOut, "mouse %lf %lf\n", p.x, p.y);
+  double mouseX = p.x;
+  double mouseY = size.height - p.y;
+  fprintf(self.eventOut, "mouse %lf %lf\n", mouseX, mouseY);
 }
 
 - (void)keyDown:theEvent {
@@ -485,10 +486,25 @@ void spawnCore(NSFileHandle** paintIn, FILE** eventOut){
 @end
 
 @implementation MyWindowDelegate
+
 - (BOOL)windowShouldClose:(id)sender {
   fprintf(self.eventOut, "quit\n");
   return NO;
 }
+
+- (void)windowDidBecomeMain:(NSNotification*)notif {
+  NSPoint loc = [NSEvent mouseLocation];
+  NSRect winframe = [mainWindow frame];
+  loc.x -= winframe.origin.x;
+  loc.y -= winframe.origin.y;
+  id v = [mainWindow contentView];
+  NSSize size = [v frame].size;
+  NSPoint p = [v convertPoint:loc fromView:nil];
+  double mouseX = p.x;
+  double mouseY = size.height - p.y;
+  fprintf(self.eventOut, "mouse %lf %lf\n", mouseX, mouseY);
+}
+
 @end
 
 @interface MyDelegate : NSObject <NSApplicationDelegate>
@@ -543,7 +559,6 @@ void spawnCore(NSFileHandle** paintIn, FILE** eventOut){
 - (void)windowUnminimize:NSNotification;
 - (void)windowResized:NSNotification;
 
-- (void)registerStdinReadable;
 - (void)registerWindowClosing;
 - (void)registerWindowUnminimize;
 @end
@@ -604,9 +619,6 @@ void dumpBytes(int n, const unsigned char* bytes){
   [self.paintIn waitForDataInBackgroundAndNotify];
 }
 
-
-- (void)registerStdinReadable {
-}
 
 - (void)registerWindowClosing {
   [self.center
