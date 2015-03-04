@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Paint where
 
+import System.IO
 import Data.ByteString.Builder
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as BSL
@@ -128,7 +129,10 @@ encodePaintCommand p = mconcat (intersperse space words) where
     Copy s -> ["copy", byteString (encodeUtf8 s)]
     SetCursor c -> ["cursor"]
 
-compilePaintCommands :: [Paint] -> ByteString
+compilePaintCommands :: [Paint] -> Builder
 compilePaintCommands ps =
-  let encode p = encodePaintCommand p <> newline in
-  toLazyByteString $ mconcat (map encode ps) 
+  let encode p = encodePaintCommand p <> newline <> "flush\n" in
+  mconcat (map encode ps) 
+
+newPaintOut :: Handle -> IO ([Paint] -> IO ())
+newPaintOut h = return (hPutBuilder h . compilePaintCommands)
