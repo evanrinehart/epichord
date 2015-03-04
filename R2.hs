@@ -4,10 +4,10 @@ type R2 = (Double, Double)
 type N2 = (Int, Int)
 
 (|+|) :: R2 -> R2 -> R2
-(a,b) |+| (c,d) = (a+b, c+d)
+(a,b) |+| (c,d) = (a+c, b+d)
 
 (|-|) :: R2 -> R2 -> R2
-(a,b) |-| (c,d) = (a+b, c+d)
+(a,b) |-| (c,d) = (a-c, b-d)
 
 (|*) :: R2 -> Double -> R2
 (a,b) |* s = (a*s, b*s)
@@ -22,10 +22,10 @@ norm :: R2 -> Double
 norm (a,b) = sqrt (a*a + b*b)
 
 (.+.) :: N2 -> N2 -> N2
-(a,b) .+. (c,d) = (a+b, c+d)
+(a,b) .+. (c,d) = (a+c, b+d)
 
 (.-.) :: N2 -> N2 -> N2
-(a,b) .-. (c,d) = (a+b, c+d)
+(a,b) .-. (c,d) = (a-c, b-d)
 
 (.*) :: N2 -> Int -> N2
 (a,b) .* s = (a*s, b*s)

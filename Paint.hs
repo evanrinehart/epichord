@@ -38,6 +38,19 @@ data Paint =
   Copy Text |
   SetCursor Cursor
 
+showPaint :: Paint -> String
+showPaint p = case p of
+  Fill r c -> unwords ["Fill", show r, show c]
+  Box r c -> unwords ["Box", show r, show c]
+  Line x0 x1 c -> unwords ["Line", show x0, show x1, show c]
+  Blit x pix -> unwords ["Blit", show x, "?"]
+  Upload n pix -> "?"
+  PutImage x n -> "?"
+  Label x txt -> "?"
+  FilePicker -> "FilePicker"
+  Copy txt -> "Copy " ++ show txt
+  SetCursor c -> "SetCursor " ++ show c
+
 data Cursor =
   CursorDefault |
   CursorOpenHand |
