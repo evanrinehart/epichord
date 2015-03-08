@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE FlexibleInstances #-}
 module Paint where
 
 import System.IO
@@ -37,6 +38,13 @@ data Paint =
   FilePicker |
   Copy Text |
   SetCursor Cursor
+    deriving Eq
+
+instance Eq (Image PixelRGB8) where
+  (Image w1 h1 v1) == (Image w2 h2 v2) =
+    w1 == w2 &&
+    h1 == h2 &&
+    v1 == v2
 
 showPaint :: Paint -> String
 showPaint p = case p of
@@ -59,7 +67,7 @@ data Cursor =
   CursorText |
   CursorLeftRight |
   CursorUpDown
-    deriving Show
+    deriving (Eq, Show)
 
 asciiHex :: Word8 -> Word8
 asciiHex n = if n < 10
@@ -126,8 +134,8 @@ encodePaintCommand :: Paint -> Builder
 encodePaintCommand p = mconcat (intersperse space words) where
   words = case p of
     Line (x,y) (u,v) (r,g,b) -> "line" : map intDec [x,y,u,v,r,g,b]
-    Fill (Rect x y w h) (r,g,b)    -> "fill" : map intDec [x,y,w,h,r,g,h]
-    Box (Rect x y w h) (r,g,b)     -> "box"  : map intDec [x,y,w,h,r,g,h]
+    Fill (Rect x y w h) (r,g,b)    -> "fill" : map intDec [x,y,w,h,r,g,b]
+    Box (Rect x y w h) (r,g,b)     -> "box"  : map intDec [x,y,w,h,r,g,b]
     Blit (x,y) img -> ["blit", intDec x, intDec y, encodePixmap img]
     Upload n img -> ["upload", intDec n, encodePixmap img]
     PutImage (x,y) n -> ["image", intDec x, intDec y, intDec n]
@@ -139,11 +147,13 @@ encodePaintCommand p = mconcat (intersperse space words) where
 
 compilePaintCommands :: [Paint] -> Builder
 compilePaintCommands ps =
-  let encode p = encodePaintCommand p <> newline <> "flush\n" in
+  let encode p = encodePaintCommand p <> newline in
   mconcat (map encode ps) 
 
 newPaintOut :: Handle -> [Paint] -> IO ()
-newPaintOut h = hPutBuilder h . compilePaintCommands
+newPaintOut h x = do
+  --print (toLazyByteString $ compilePaintCommands x)
+  (hPutBuilder h . compilePaintCommands) x
 
 translatePaint :: Paint -> Z2 -> Paint
 translatePaint p delta = case p of

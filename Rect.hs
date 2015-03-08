@@ -7,7 +7,7 @@ data Rect a = Rect
   , left :: a
   , width :: a
   , height :: a }
-    deriving Show
+    deriving (Eq, Show)
 
 inRect :: (Num a, Ord a) => Rect a -> (a,a) -> Bool
 inRect r xy = not (outsideRect r xy)

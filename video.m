@@ -12,6 +12,7 @@ int paintBufferPtr = 0;
 
 void flushGraphics(){
   NSGraphicsContext* context = [NSGraphicsContext currentContext];
+  //printf("flushing cocoa\n");
   [context flushGraphics];
 }
 
@@ -56,6 +57,7 @@ void executePaintCommand(){
   }
   base = strlen(command);
 
+  //printf("buffer = %s\n", paintBuffer);
   //printf("command = %s\n", command);
 
   if(strcmp(command, "fill")==0){
@@ -87,7 +89,13 @@ void executePaintCommand(){
 
 void appendToPaintBuffer(size_t count, const unsigned char* bytes){
   // count <= 256, buffer >= 1024, only doubling is needed when no room
-  //printf("append to buffer %lu\n", count);
+  //printf("append to buffer %lu: \n", count);
+  //printf("\"");
+  for(int i=0; i<count; i++){
+    //printf("%c", bytes[i]);
+  }
+  //printf("\"");
+    //printf("\n");
   if(paintBufferPtr + count >= paintBufferSize){
     printf("expanding paint buffer to %lu\n", paintBufferSize * 2);
     paintBuffer = realloc(paintBuffer, paintBufferSize * 2);
@@ -127,9 +135,9 @@ void paintIn(size_t count, const unsigned char* bytes){
 
       if(i==count) return;
     }
-    else if(i == count-1){
+    else if(i == count - 1){
       //printf("no newline found i=%d j=%d\n", i, j);
-      appendToPaintBuffer(i-j, bytes+j);
+      appendToPaintBuffer(i-j+1, bytes+j);
       return;
     }
     else{
@@ -388,10 +396,12 @@ void spawnCore(NSFileHandle** paintIn, FILE** eventOut){
 
 - (void)mouseDown:theEvent {
   fprintf(self.eventOut, "click %d\n", 0);
+  //printf("mouse down cocoa\n");
 }
 
 - (void)mouseUp:theEvent {
   fprintf(self.eventOut, "release %d\n", 0);
+  //printf("mouse up cocoa\n");
 }
 
 - (void)rightMouseDown:theEvent {
@@ -419,6 +429,7 @@ void spawnCore(NSFileHandle** paintIn, FILE** eventOut){
   double mouseX = p.x;
   double mouseY = size.height - p.y;
   fprintf(self.eventOut, "mouse %lf %lf\n", mouseX, mouseY);
+  //printf("mouse moved cocoa\n");
 }
 
 - (void)mouseMoved:theEvent {
@@ -521,6 +532,15 @@ void spawnCore(NSFileHandle** paintIn, FILE** eventOut){
   fprintf(self.eventOut, "mouse %lf %lf\n", mouseX, mouseY);
 }
 
+- (void)windowDidEndLiveResize:(NSNotification*)notif {
+  NSWindow* win = [notif object];
+  NSSize size = [[win contentView] frame].size;
+  fprintf(self.eventOut, "resize %d %d\n", (int)size.width, (int)size.height);
+
+  //printf("resize cocoa\n");
+}
+
+
 @end
 
 @interface MyDelegate : NSObject <NSApplicationDelegate>
@@ -573,7 +593,7 @@ void spawnCore(NSFileHandle** paintIn, FILE** eventOut){
 - (void)windowClosing:NSNotification;
 - (void)stdinReadable:NSNotification;
 - (void)windowUnminimize:NSNotification;
-- (void)windowResized:NSNotification;
+//- (void)windowResized:NSNotification;
 
 - (void)registerWindowClosing;
 - (void)registerWindowUnminimize;
@@ -606,11 +626,15 @@ void dumpBytes(int n, const unsigned char* bytes){
   printf("window exposed\n");
 }
 
+/*
 - (void)windowResized:notif {
   NSWindow* win = [notif object];
   NSSize size = [[win contentView] frame].size;
   fprintf(self.eventOut, "resize %d %d\n", (int)size.width, (int)size.height);
+
+  //printf("resize cocoa\n");
 }
+*/
 
 - (void)stdinReadable:(NSNotification*)notif {
   int i=0;
@@ -652,6 +676,7 @@ void dumpBytes(int n, const unsigned char* bytes){
     object:nil ];
 }
 
+/*
 - (void)registerWindowResized {
   [self.center
     addObserver:self
@@ -659,6 +684,7 @@ void dumpBytes(int n, const unsigned char* bytes){
     name:@"NSWindowDidResizeNotification"
     object:nil ];
 }
+*/
 
 @end
 
@@ -704,8 +730,7 @@ int main (int argc, const char * argv[])
     object:paintIn ];
   [handler registerWindowClosing];
   [handler registerWindowUnminimize];
-  [handler registerWindowResized];
-
+  //[handler registerWindowResized];
   MyMenuHandler* menuHandler = [MyMenuHandler new];
 
   id menubar = [[NSMenu new] autorelease];
