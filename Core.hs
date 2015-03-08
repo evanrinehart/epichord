@@ -32,18 +32,13 @@ main = do
   let window = rawWindowSize raws
   let quit = rawQuit raws
   let click = rawClick raws
-  setup window mouse click quit painter
-  setSize (640, 480)
-  waitE quit
-
-setup :: X N2 -> X R2 -> E MouseButton -> E () -> Painter -> IO ()
-setup window mouse click quit painter = do
   sm   <- runStateMachine (() <$ click) Nothing simonState
   look <- runDetector (simonView <$> pure (0,0) <*> window <*> sm) (/=)
   runEvent look painter
-  return ()
+  setSize (640, 480)
+  waitE quit
 
-simonView :: Z2 -> Z2 -> Maybe Int -> [Paint]
+simonView :: N2 -> N2 -> Maybe Int -> [Paint]
 simonView (x,y) (w,h) color = [c1, c2, c3, c4] where
   w2 = w `div` 2
   h2 = h `div` 2
@@ -69,12 +64,6 @@ simonState _ (Just 1) = Just 2
 simonState _ (Just 2) = Just 3
 simonState _ _ = Nothing
 
-lr :: X (Double, Double) -> X (Int, Int) -> X Bool
-lr mouse window = liftA2 f mouse window where
-  f (x,y) (w,h) = let x' = floor x in
-                  (x' < w `div` 2)
-
---newRepainter :: Eq a => Painter -> X a -> (a -> [Paint]) -> IO ()
 
 keepAlive :: ([Paint] -> IO ()) -> IO ()
 keepAlive paint = forever $ do
