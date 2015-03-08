@@ -11,6 +11,7 @@ import Data.Unamb
 import Data.IORef
 import Control.Concurrent
 import Control.Concurrent.STM
+import Data.Function
 
 data X a where
   PureX :: a -> X a
@@ -32,6 +33,7 @@ data E a where
   ProductE  :: (b -> c -> a) -> E b -> E c -> E a
   SnapshotE :: E b -> X a -> E a
   PortE     :: TChan a -> E a
+  FilterE   :: (a -> Bool) -> E a -> E a
 
 instance Functor E where
   fmap f e = FmapE f e
@@ -42,6 +44,9 @@ instance Monoid (E a) where
 
 snapshot :: E a -> X b -> E (a,b)
 snapshot e x = ProductE (,) e (SnapshotE e x)
+
+filterE :: (a -> Bool) -> E a -> E a
+filterE f e = FilterE f e
 
 dupE :: E a -> IO (E a)
 dupE e = case e of
@@ -63,6 +68,9 @@ dupE e = case e of
   SnapshotE e' x -> do
     e'' <- dupE e'
     return (SnapshotE e'' x)
+  FilterE f e' -> do
+    e'' <- dupE e'
+    return (FilterE f e'')
 
 readE :: E a -> IO a
 readE e = case e of
@@ -77,6 +85,11 @@ readE e = case e of
   SnapshotE e' x -> do
     readE e'
     atomically (readX x)
+  FilterE f e' -> fix $ \loop -> do
+    x <- readE e'
+    if f x
+      then return x
+      else loop
 
 runStateMachine :: E a -> s -> (a -> s -> s) -> IO (X s)
 runStateMachine e0 s0 trans = do
@@ -116,8 +129,8 @@ runDetector x diff = do
     writeOut v'
   return e
 
-onE :: E a -> (a -> IO ()) -> IO ThreadId
-onE e0 act = do
+runEvent :: E a -> (a -> IO ()) -> IO ThreadId
+runEvent e0 act = do
   e <- dupE e0
   forkIO $ forever $ do
     x <- readE e

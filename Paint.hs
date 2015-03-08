@@ -152,8 +152,8 @@ compilePaintCommands ps =
 
 newPaintOut :: Handle -> [Paint] -> IO ()
 newPaintOut h x = do
-  --print (toLazyByteString $ compilePaintCommands x)
   (hPutBuilder h . compilePaintCommands) x
+  hPutStrLn h "flush"
 
 translatePaint :: Paint -> Z2 -> Paint
 translatePaint p delta = case p of

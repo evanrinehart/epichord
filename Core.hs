@@ -25,18 +25,23 @@ import R2
 main = do
   (paintOutH, eventInH) <- parseCommandLineOptions
   let painter = newPaintOut paintOutH
-  let flush = hPutStrLn paintOutH "flush"
   --forkIO (keepAlive painter)
   putStrLn "CORE Hello World"
   (raws, setSize) <- newRaws eventInH
   let mouse = rawMouse raws
   let window = rawWindowSize raws
   let quit = rawQuit raws
-  look <- runDetector (simonView <$> pure (0,0) <*> window <*> pure Nothing) (/=)
-  onE look (\cmds -> painter cmds >> flush)
-  --onE sideChanged print
+  let click = rawClick raws
+  setup window mouse click quit painter
   setSize (640, 480)
   waitE quit
+
+setup :: X N2 -> X R2 -> E MouseButton -> E () -> Painter -> IO ()
+setup window mouse click quit painter = do
+  sm   <- runStateMachine (() <$ click) Nothing simonState
+  look <- runDetector (simonView <$> pure (0,0) <*> window <*> sm) (/=)
+  runEvent look painter
+  return ()
 
 simonView :: Z2 -> Z2 -> Maybe Int -> [Paint]
 simonView (x,y) (w,h) color = [c1, c2, c3, c4] where
@@ -56,6 +61,13 @@ simonView (x,y) (w,h) color = [c1, c2, c3, c4] where
   c2 = Fill (Rect mx y w2 h2) (calc 1 color)
   c3 = Fill (Rect x my w2 h2) (calc 2 color)
   c4 = Fill (Rect mx my w2 h2) (calc 3 color)
+
+simonState :: () -> Maybe Int -> Maybe Int
+simonState _ Nothing = Just 0
+simonState _ (Just 0) = Just 1
+simonState _ (Just 1) = Just 2
+simonState _ (Just 2) = Just 3
+simonState _ _ = Nothing
 
 lr :: X (Double, Double) -> X (Int, Int) -> X Bool
 lr mouse window = liftA2 f mouse window where
