@@ -28,13 +28,14 @@ main = do
   let flush = hPutStrLn paintOutH "flush"
   --forkIO (keepAlive painter)
   putStrLn "CORE Hello World"
-  raws <- newRaws (640, 480) eventInH
+  (raws, setSize) <- newRaws eventInH
   let mouse = rawMouse raws
   let window = rawWindowSize raws
   let quit = rawQuit raws
   look <- runDetector (simonView <$> pure (0,0) <*> window <*> pure Nothing) (/=)
   onE look (\cmds -> painter cmds >> flush)
   --onE sideChanged print
+  setSize (640, 480)
   waitE quit
 
 simonView :: Z2 -> Z2 -> Maybe Int -> [Paint]

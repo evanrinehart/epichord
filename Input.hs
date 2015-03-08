@@ -148,10 +148,10 @@ handleEvents h eat = forever $ do
 
 -- -- --
 
-newRaws :: Z2 -> Handle -> IO Raws
-newRaws wh0 h = do
+newRaws :: Handle -> IO (Raws, N2 -> IO ())
+newRaws h = do
   (setMouseLoc, mouse) <- newX (0,0)
-  (setWindowSize, window) <- newX wh0
+  (setWindowSize, window) <- newX (0,0)
   (doClick, click) <- newE
   (doRelease, release) <- newE
   (doChar, character) <- newE
@@ -172,4 +172,5 @@ newRaws wh0 h = do
       Wheel w -> doWheel w
       e -> print e
   return
-    (Raws mouse window click release wheel keydown keyup character quit)
+    ( Raws mouse window click release wheel keydown keyup character quit
+    , setWindowSize )

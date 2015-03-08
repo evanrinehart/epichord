@@ -2,6 +2,7 @@ module R2 where
 
 type R2 = (Double, Double)
 type Z2 = (Int, Int)
+type N2 = Z2
 
 (|+|) :: R2 -> R2 -> R2
 (a,b) |+| (c,d) = (a+c, b+d)
