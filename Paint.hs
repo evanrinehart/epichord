@@ -29,11 +29,11 @@ type Painter = [Paint] -> IO ()
 data Paint =
   Fill (Rect Int) Color |
   Box (Rect Int) Color |
-  Line N2 N2 Color |
-  Blit N2 Pixmap |
+  Line Z2 Z2 Color |
+  Blit Z2 Pixmap |
   Upload Int Pixmap |
-  PutImage N2 Int |
-  Label N2 Text |
+  PutImage Z2 Int |
+  Label Z2 Text |
   FilePicker |
   Copy Text |
   SetCursor Cursor
@@ -145,7 +145,7 @@ compilePaintCommands ps =
 newPaintOut :: Handle -> [Paint] -> IO ()
 newPaintOut h = hPutBuilder h . compilePaintCommands
 
-translatePaint :: Paint -> N2 -> Paint
+translatePaint :: Paint -> Z2 -> Paint
 translatePaint p delta = case p of
   Fill r c -> Fill (r `translateRect` delta) c
   Box r c -> Box (r `translateRect` delta) c

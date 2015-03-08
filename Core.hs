@@ -6,53 +6,41 @@ import Control.Monad
 import System.Exit
 import Control.Concurrent
 
+import Control.Applicative
+
+import Data.Monoid
+import Data.Ix
+
 import Input
 import Config
 import Paint
-import XVar
-import Tracker
-import Button
+import X
+--import Tracker
+--import Button
 import StateMachine
 import Chart
 import Rect
+import R2
 
 main = do
   (paintOutH, eventInH) <- parseCommandLineOptions
+  let painter = newPaintOut paintOutH
+  forkIO (keepAlive painter)
   putStrLn "CORE Hello World"
-  let paint = newPaintOut paintOutH
-  let newButton = makeNewButton paint
-  button <- newButton buttonLook (putStrLn "BOOYA")
-  character <- newXVar (\c -> return ())
-  windowSize <- newXVar (\(w,h) -> return ())
-  transfer <- newXVar $ \t -> case t of
-    Transfer 1 _ -> writeXVar button Out
-    Transfer _ 1 -> writeXVar button In
-  (_, position) <- newMouseTracker (0,0)
-    (rect (Rect 0 0 100 100) 1) 0 transfer
-  handleEvents eventInH $ \i -> do
-    case i of
-      Mouse x y -> writeXVar position (x,y)
-      Click (MouseButton 0) -> writeXVar button MClick
-      Release (MouseButton 0) -> writeXVar button MRelease
-      KeyDown k -> print k
-      Quit -> exitSuccess
-      Resize w h -> writeXVar windowSize (w,h)
-      Character c -> writeXVar character c
-      e -> print e
+  raws <- newRaws (640, 480) eventInH
+  let mouse = rawMouse raws
+  let window = rawWindowSize raws
+  let quit = rawQuit raws
+  sideChanged <- runDetector (lr mouse window) (/=)
+  onE sideChanged print
+  waitE quit
+
+lr :: X (Double, Double) -> X (Int, Int) -> X Bool
+lr mouse window = liftA2 f mouse window where
+  f (x,y) (w,h) = let x' = floor x in
+                  (x' < w `div` 2)
 
 keepAlive :: ([Paint] -> IO ()) -> IO ()
 keepAlive paint = forever $ do
   threadDelay 10000000
   paint []
-
-buttonLook :: UpDown -> [Paint]
-buttonLook ud = case ud of
-  Up   -> [Fill (Rect 0 0 100 100) (0,255,0)]
-  Down -> [Fill (Rect 0 0 100 100) (0,0,255)]
-
-makeNewButton :: Painter
-              -> (UpDown -> [Paint])
-              -> IO ()
-              -> IO (XVar MouseActivity)
-makeNewButton paint look go =
-  newStateMachine (buttonSM (paint . look) go) OutUp

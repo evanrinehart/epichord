@@ -10,9 +10,12 @@ import Data.Ratio
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Char
+import Control.Concurrent
 
+import R2
 import qualified Keys as K
 import Keys (Key)
+import X
 
 data RawInput =
   Mouse Double Double |
@@ -23,7 +26,6 @@ data RawInput =
   Character Char |
   Resize Int Int |
   Wheel Double |
-  Confirm |
   FilePick FilePath |
   MenuNew |
   MenuOpen |
@@ -35,6 +37,17 @@ data RawInput =
 
 newtype MouseButton = MouseButton Int
   deriving (Show, Eq, Ord)
+
+data Raws = Raws
+  { rawMouse :: X R2
+  , rawWindowSize :: X Z2
+  , rawClick :: E MouseButton
+  , rawRelease :: E MouseButton
+  , rawWheel :: E Double
+  , rawKeydown :: E Key
+  , rawKeyup :: E Key
+  , rawChar :: E Char
+  , rawQuit :: E () }
 
 quickParse :: String -> Parser a -> Maybe a
 quickParse s parser =
@@ -110,7 +123,6 @@ parseInputLine line = quickParse line $ do
   r <- choice
     [ mouse <$> string "mouse" <*> space <*> float <*> space <*> float
     , try $ click <$> string "click" <*> space <*> button
-    , try $ Confirm <$ string "confirm"
     , try $ character <$> string "character" <*> space <*> charParser
     , try $ release <$> string "release" <*> space <*> button
     , try $ keydown <$> string "keydown" <*> space <*> key
@@ -133,3 +145,31 @@ handleEvents h eat = forever $ do
   case parseInputLine line of
     Nothing -> hPutStrLn stderr ("** CORE unrecognized input " ++ line)
     Just r -> eat r
+
+-- -- --
+
+newRaws :: Z2 -> Handle -> IO Raws
+newRaws wh0 h = do
+  (setMouseLoc, mouse) <- newX (0,0)
+  (setWindowSize, window) <- newX wh0
+  (doClick, click) <- newE
+  (doRelease, release) <- newE
+  (doChar, character) <- newE
+  (pressKey, keydown) <- newE
+  (releaseKey, keyup) <- newE
+  (doWheel, wheel) <- newE
+  (doQuit, quit) <- newE
+  forkIO $ handleEvents h $ \i -> do
+    case i of
+      Resize w h -> setWindowSize (w,h)
+      Mouse x y -> setMouseLoc (x,y)
+      Click mb -> doClick mb
+      Release mb -> doRelease mb
+      KeyDown k -> pressKey k
+      KeyUp k -> releaseKey k
+      Quit -> doQuit ()
+      Character c -> doChar c
+      Wheel w -> doWheel w
+      e -> print e
+  return
+    (Raws mouse window click release wheel keydown keyup character quit)
