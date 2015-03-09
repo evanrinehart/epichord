@@ -40,7 +40,7 @@ newtype MouseButton = MouseButton Int
 
 data Raws = Raws
   { rawMouse :: X R2
-  , rawWindowSize :: X Z2
+  , rawWindowSize :: X R2
   , rawClick :: E MouseButton
   , rawRelease :: E MouseButton
   , rawWheel :: E Double
@@ -148,7 +148,7 @@ handleEvents h eat = forever $ do
 
 -- -- --
 
-newRaws :: Handle -> IO (Raws, N2 -> IO ())
+newRaws :: Handle -> IO (Raws, R2 -> IO ())
 newRaws h = do
   (setMouseLoc, mouse) <- newX (0,0)
   (setWindowSize, window) <- newX (0,0)
@@ -161,8 +161,8 @@ newRaws h = do
   (doQuit, quit) <- newE
   forkIO $ handleEvents h $ \i -> do
     case i of
-      Resize w h -> setWindowSize (w,h)
       Mouse x y -> setMouseLoc (x,y)
+      Resize w h -> setWindowSize (realToFrac w, realToFrac h)
       Click mb -> doClick mb
       Release mb -> doRelease mb
       KeyDown k -> pressKey k

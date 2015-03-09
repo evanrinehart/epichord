@@ -9,10 +9,10 @@ import Data.Maybe
 data CommandLineOptions = CommandLineOptions
   { paintToFd :: Maybe Int
   , eventsFromFd :: Maybe Int
-  , windowDimensions :: (Int,Int) }
+  , windowDimensions :: (Double, Double) }
     deriving (Show)
 
-parseCommandLineOptions :: IO (Handle, Handle, (Int,Int))
+parseCommandLineOptions :: IO (Handle, Handle, (Double, Double))
 parseCommandLineOptions = do
   CommandLineOptions p e dim <- parseRawCommandLineOptions
   p' <- maybe (return stdout) (fdToHandle . Fd . fromIntegral) p
