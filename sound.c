@@ -787,7 +787,7 @@ void executeMidi(int type, int channel, int arg1, int arg2){
   midiSize = 3;
   if((midi[0] & 0xf0) == 0xc0 || (midi[0] & 0xf0) == 0xd0) midiSize = 2;
   if((midi[0] & 0xf0) != 0x80){
-    fprintf(stderr, "%llu %02x %02x %02x\n", now, midi[0], midi[1], midi[2]);
+    //fprintf(stderr, "%llu %02x %02x %02x\n", now, midi[0], midi[1], midi[2]);
   }
   if((midi[0] & 0xf0) == 0x90 && midi[2] > 0){
     rememberNoteOn(midi[0] & 0x0f, midi[1]);
@@ -840,7 +840,7 @@ void stdinWorker(){
   if(result <= 0){
     fprintf(stderr, "SOUND unrecognized command\n");
   }
-  else if(strcmp(command, "LOAD")==0){
+  else if(strcmp(command, "load")==0){
     result = sscanf(buf, "%s %s %s", command, arg1, arg2);
     if(result < 3){
       fprintf(stderr, "** SOUND invalid LOAD command (%s)\n", buf);
@@ -849,7 +849,7 @@ void stdinWorker(){
     currentSequence = loadData(arg1, arg2);
     emptyTrash();
   }
-  else if(strcmp(command, "PLAY")==0){
+  else if(strcmp(command, "play")==0){
     if(playFlag == 0){
       playFlag = 1;
       spawnDispatchThread();
@@ -858,7 +858,7 @@ void stdinWorker(){
       fprintf(stderr, "SOUND refusing to play, playFlag=%d\n", playFlag);
     }
   }
-  else if(strcmp(command, "STOP")==0){
+  else if(strcmp(command, "stop")==0){
     if(playFlag == 1){
       playFlag = 0;
       joinDispatchThread();
@@ -867,7 +867,7 @@ void stdinWorker(){
       fprintf(stderr, "SOUND stop ignored, playFlag=%d\n", playFlag);
     }
   }
-  else if(strcmp(command, "SEEK")==0){
+  else if(strcmp(command, "seek")==0){
     result = sscanf(buf, "%s %d %d/%d", command, &number, &numerator, &denominator);
     if(result < 4){
       result = sscanf(buf, "%s %d", command, &number);
@@ -880,13 +880,13 @@ void stdinWorker(){
     }
     executeSeek(number, numerator, denominator);
   }
-  else if(strcmp(command, "CRASH")==0){
-    fprintf(stderr, "%d\n", 0 / (int)NULL);
+  else if(strcmp(command, "crash")==0){
+    abort();
   }
-  else if(strcmp(command, "EXIT")==0){
+  else if(strcmp(command, "exit")==0){
     interrupt(0);
   }
-  else if(strcmp(command, "CUT_ALL")==0){
+  else if(strcmp(command, "cut-all")==0){
     if(playFlag == 0){
       killAll();
     }
@@ -895,7 +895,7 @@ void stdinWorker(){
       usleep(FRAME_SIZE_NS/1000);
     }
   }
-  else if(strcmp(command, "SET_LOOP")==0){
+  else if(strcmp(command, "set-loop")==0){
     result = sscanf(buf, "%s %lf %lf", command, &loop0, &loop1);
     if(result < 3){
       fprintf(stderr, "** SOUND invalid SET_LOOP command (%s)\n", buf);
@@ -904,7 +904,7 @@ void stdinWorker(){
       setLoopEndpoints(loop0, loop1);
     }
   }
-  else if(strcmp(command, "ENABLE_LOOP")==0){
+  else if(strcmp(command, "enable-loop")==0){
     if(loopInitialized == 0){
       fprintf(stderr, "** SOUND can't enable loop, not initialized\n");
     }
@@ -912,10 +912,10 @@ void stdinWorker(){
       loopFlag = 1;
     }
   }
-  else if(strcmp(command, "DISABLE_LOOP")==0){
+  else if(strcmp(command, "disable-loop")==0){
     loopFlag = 0;
   }
-  else if(strcmp(command, "TICKS_PER_BEAT")==0){
+  else if(strcmp(command, "ticks-per-beat")==0){
     result = sscanf(buf, "%s %d", command, &number);
     if(result < 2){
       fprintf(stderr, "** SOUND invalid TICKS_PER_BEAT command (%s)\n", buf);
@@ -932,10 +932,11 @@ void stdinWorker(){
       }
     }
   }
-  else if(strcmp(command, "TELL")==0){
+  else if(strcmp(command, "tell")==0){
     fprintf(stdout, "%lf\n", getCurrentBeat());
+    fflush(stdout);
   }
-  else if(strcmp(command, "EXECUTE")==0){
+  else if(strcmp(command, "execute")==0){
     result = sscanf(
       buf, "%s %d %d %d %d",
       command,
@@ -948,11 +949,11 @@ void stdinWorker(){
       executeMidi(midi[0], midi[1], midi[2], midi[3]);
     }
   }
-  else if(strcmp(command, "ENABLE_CAPTURE")==0){
+  else if(strcmp(command, "enable-capture")==0){
   }
-  else if(strcmp(command, "DISABLE_CAPTURE")==0){
+  else if(strcmp(command, "disable-capture")==0){
   }
-  else if(strcmp(command, "CAPTURE")==0){
+  else if(strcmp(command, "capture")==0){
   }
   else{
     fprintf(stderr, "SOUND unrecognized command (%s)\n", buf);
