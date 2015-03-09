@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE FlexibleInstances #-}
 module Paint where
 
 import System.IO
@@ -38,13 +37,6 @@ data Paint =
   FilePicker |
   Copy Text |
   SetCursor Cursor
-    deriving Eq
-
-instance Eq (Image PixelRGB8) where
-  (Image w1 h1 v1) == (Image w2 h2 v2) =
-    w1 == w2 &&
-    h1 == h2 &&
-    v1 == v2
 
 showPaint :: Paint -> String
 showPaint p = case p of

@@ -15,9 +15,6 @@ import Input
 import Config
 import Paint
 import X
---import Tracker
---import Button
-import StateMachine
 import Chart
 import Rect
 import R2
@@ -32,14 +29,23 @@ main = do
   let window = rawWindowSize raws
   let quit = rawQuit raws
   let click = rawClick raws
-  sm   <- runStateMachine (() <$ click) Nothing simonState
-  look <- runDetector (simonView <$> pure (0,0) <*> window <*> sm) (/=)
-  runEvent look painter
+  sm <- newAccumulator (() <$ click) Nothing simonState
+  let simon = Simon <$> pure (0,0) <*> window <*> sm
+  newEdgeHandler simon diff (painter . simonView)
   setSize (640, 480)
   waitE quit
 
-simonView :: N2 -> N2 -> Maybe Int -> [Paint]
-simonView (x,y) (w,h) color = [c1, c2, c3, c4] where
+diff :: Eq a => a -> a -> Maybe a
+diff x y = if x == y then Nothing else Just y
+
+data Simon = Simon
+  { origin :: N2
+  , size :: N2
+  , stat :: Maybe Int }
+    deriving (Eq, Show)
+
+simonView :: Simon -> [Paint]
+simonView (Simon (x,y) (w,h) color) = [c1, c2, c3, c4] where
   w2 = w `div` 2
   h2 = h `div` 2
   mx = x + w `div` 2

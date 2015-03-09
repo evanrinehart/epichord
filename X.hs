@@ -1,8 +1,19 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE RankNTypes #-}
-module X where
+module X (
+  X,
+  E,
+  newX,
+  newE,
+  snapshot,
+  filterE,
+  newEdgeEvent,
+  newEdgeHandler,
+  newAccumulator,
+  newEventHandler,
+  waitE
+) where
 
-import System.Random
 import Control.Applicative
 import Data.Functor
 import Data.Monoid
@@ -19,13 +30,6 @@ data X a where
   ApplX :: forall a b . X (b -> a) -> X b -> X a
   PortX :: TVar a -> X a
 
-instance Functor X where
-  fmap f x = FmapX f x
-
-instance Applicative X where
-  pure x = PureX x
-  f <*> x = ApplX f x
-
 data E a where
   NeverE    :: E a
   FmapE     :: forall a b . (b -> a) -> E b -> E a
@@ -35,18 +39,19 @@ data E a where
   PortE     :: TChan a -> E a
   FilterE   :: (a -> Bool) -> E a -> E a
 
+instance Functor X where
+  fmap f x = FmapX f x
+
+instance Applicative X where
+  pure x = PureX x
+  f <*> x = ApplX f x
+
 instance Functor E where
   fmap f e = FmapE f e
 
 instance Monoid (E a) where
   mempty = NeverE
   mappend e1 e2 = MappendE e1 e2
-
-snapshot :: E a -> X b -> E (a,b)
-snapshot e x = ProductE (,) e (SnapshotE e x)
-
-filterE :: (a -> Bool) -> E a -> E a
-filterE f e = FilterE f e
 
 dupE :: E a -> IO (E a)
 dupE e = case e of
@@ -91,19 +96,6 @@ readE e = case e of
       then return x
       else loop
 
-runStateMachine :: E a -> s -> (a -> s -> s) -> IO (X s)
-runStateMachine e0 s0 trans = do
-  ref <- newIORef s0
-  e <- dupE e0
-  (writeOut, out) <- newX s0
-  forkIO $ forever $ do
-    s <- readIORef ref
-    x <- readE e
-    let s' = trans x s
-    writeIORef ref s'
-    writeOut s'
-  return out
-
 readX :: X a -> STM a
 readX x = case x of
   PureX v -> return v
@@ -114,27 +106,13 @@ readX x = case x of
     return (f x)
   PortX tv -> readTVar tv
 
-runDetector :: X a -> (a -> a -> Bool) -> IO (E a)
-runDetector x diff = do
-  v0 <- atomically (readX x)
-  ref <- newIORef v0
-  (writeOut, e) <- newE
-  forkIO $ forever $ do
-    v <- readIORef ref
-    v' <- atomically $ do
-      v' <- readX x
-      when (diff v v' == False) retry
-      return v'
-    writeIORef ref v'
-    writeOut v'
-  return e
 
-runEvent :: E a -> (a -> IO ()) -> IO ThreadId
-runEvent e0 act = do
-  e <- dupE e0
-  forkIO $ forever $ do
-    x <- readE e
-    act x
+hang :: IO a
+hang = do
+  threadDelay (100 * 10^(6::Int))
+  hang
+
+---
 
 newX :: a -> IO (a -> IO (), X a)
 newX v0 = do
@@ -150,13 +128,54 @@ newE = do
     ( \x -> atomically (writeTChan ch x)
     , PortE ch )
 
+snapshot :: E a -> X b -> E (a,b)
+snapshot e x = ProductE (,) e (SnapshotE e x)
+
+filterE :: (a -> Bool) -> E a -> E a
+filterE f e = FilterE f e
+
+newEdgeEvent :: X a -> (a -> a -> Maybe b) -> IO (E b)
+newEdgeEvent x diff = do
+  (writeOut, e) <- newE
+  newEdgeHandler x diff writeOut
+  return e
+
+newEdgeHandler :: X a -> (a -> a -> Maybe b) -> (b -> IO ()) -> IO ()
+newEdgeHandler x diff act = do
+  v0 <- atomically (readX x)
+  ref <- newIORef v0
+  forkIO $ forever $ do
+    v <- readIORef ref
+    (d, v') <- atomically $ do
+      v' <- readX x
+      case diff v v' of
+        Just d  -> return (d, v')
+        Nothing -> retry
+    writeIORef ref v'
+    act d
+  return ()
+
+newAccumulator :: E a -> s -> (a -> s -> s) -> IO (X s)
+newAccumulator e0 s0 trans = do
+  ref <- newIORef s0
+  (writeOut, out) <- newX s0
+  newEventHandler e0 $ \x -> do
+    s <- readIORef ref
+    let s' = trans x s
+    writeIORef ref s'
+    writeOut s'
+  return out
+
+newEventHandler :: E a -> (a -> IO ()) -> IO ()
+newEventHandler e0 act = do
+  e <- dupE e0
+  forkIO $ forever $ do
+    x <- readE e
+    act x
+  return ()
+
 waitE :: E a -> IO a
 waitE e0 = do
   e <- dupE e0
   readE e
-
-hang :: IO a
-hang = do
-  threadDelay (100 * 10^(6::Int))
-  hang
 
