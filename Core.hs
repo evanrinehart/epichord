@@ -3,9 +3,10 @@ module Main where
 import Control.Applicative
 
 import App
-import Demo
 import X
+import Demo
 
+main :: IO ()
 main = setupWith $ \mouse click window newRepainter -> do
   putStrLn "CORE Hello World"
   let rects = liftA2 layout (pure (0,0)) window
