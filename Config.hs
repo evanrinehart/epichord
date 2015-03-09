@@ -8,18 +8,19 @@ import Data.Maybe
 
 data CommandLineOptions = CommandLineOptions
   { paintToFd :: Maybe Int
-  , eventsFromFd :: Maybe Int }
+  , eventsFromFd :: Maybe Int
+  , windowDimensions :: (Int,Int) }
     deriving (Show)
 
-parseCommandLineOptions :: IO (Handle, Handle)
+parseCommandLineOptions :: IO (Handle, Handle, (Int,Int))
 parseCommandLineOptions = do
-  CommandLineOptions p e <- parseRawCommandLineOptions
+  CommandLineOptions p e dim <- parseRawCommandLineOptions
   p' <- maybe (return stdout) (fdToHandle . Fd . fromIntegral) p
   e' <- maybe (return stdin)  (fdToHandle . Fd . fromIntegral) e
   hSetEncoding e' utf8
   hSetEncoding p' utf8
   hSetBuffering p' LineBuffering
-  return (p', e')
+  return (p', e', dim)
 
 parseRawCommandLineOptions :: IO CommandLineOptions
 parseRawCommandLineOptions = execParser (info (helper <*> optParser) description)
@@ -35,7 +36,8 @@ description =
 optParser =
   CommandLineOptions <$>
     optional (option auto paintTo) <*>
-    optional (option auto eventsFrom)
+    optional (option auto eventsFrom) <*>
+    (option auto windowDimensionsParser)
 
 paintTo = 
   long "paint-to" <>
@@ -48,3 +50,9 @@ eventsFrom =
   short 'e' <>
   metavar "FD" <>
   help "File descriptor provided by parent process for reading input events"
+
+windowDimensionsParser =
+  long "window" <>
+  short 'w' <>
+  metavar "(W,H)" <>
+  help "Initial dimensions of the window"

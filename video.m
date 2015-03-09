@@ -334,7 +334,7 @@ void spawnCore(NSFileHandle** paintIn, FILE** eventOut){
   int eventPipe[2]; //we write to 1
   char buf1[10];
   char buf2[10];
-  char* args[] = {"core", "-p", NULL, "-e", NULL, NULL};
+  char* args[] = {"core", "-p", NULL, "-e", NULL, "-w (640,480)", NULL};
   pid_t pid;
 
   if(pipe(paintPipe) < 0){

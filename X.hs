@@ -6,12 +6,18 @@ module X (
   newX,
   newE,
   snapshot,
+  snapshot_,
   filterE,
+  justE,
+  maybeE,
   newEdgeEvent,
   newEdgeHandler,
   newAccumulator,
   newEventHandler,
-  waitE
+  waitE,
+  newTime,
+  newTrap,
+  debugX
 ) where
 
 import Control.Applicative
@@ -23,6 +29,7 @@ import Data.IORef
 import Control.Concurrent
 import Control.Concurrent.STM
 import Data.Function
+import Data.Time
 
 data X a where
   PureX :: a -> X a
@@ -37,7 +44,7 @@ data E a where
   ProductE  :: (b -> c -> a) -> E b -> E c -> E a
   SnapshotE :: E b -> X a -> E a
   PortE     :: TChan a -> E a
-  FilterE   :: (a -> Bool) -> E a -> E a
+  JustE     :: E (Maybe a) -> E a
 
 instance Functor X where
   fmap f x = FmapX f x
@@ -73,9 +80,9 @@ dupE e = case e of
   SnapshotE e' x -> do
     e'' <- dupE e'
     return (SnapshotE e'' x)
-  FilterE f e' -> do
+  JustE e' -> do
     e'' <- dupE e'
-    return (FilterE f e'')
+    return (JustE e'')
 
 readE :: E a -> IO a
 readE e = case e of
@@ -90,11 +97,11 @@ readE e = case e of
   SnapshotE e' x -> do
     readE e'
     atomically (readX x)
-  FilterE f e' -> fix $ \loop -> do
-    x <- readE e'
-    if f x
-      then return x
-      else loop
+  JustE e' -> fix $ \loop -> do
+    m <- readE e'
+    case m of
+      Nothing -> loop
+      Just x  -> return x
 
 readX :: X a -> STM a
 readX x = case x of
@@ -105,7 +112,6 @@ readX x = case x of
     x <- readX xx
     return (f x)
   PortX tv -> readTVar tv
-
 
 hang :: IO a
 hang = do
@@ -131,8 +137,17 @@ newE = do
 snapshot :: E a -> X b -> E (a,b)
 snapshot e x = ProductE (,) e (SnapshotE e x)
 
+snapshot_ :: E a -> X b -> E b
+snapshot_ e x = SnapshotE e x
+
+justE :: E (Maybe a) -> E a
+justE = JustE
+
+maybeE :: (a -> Maybe b) -> E a -> E b
+maybeE f e = justE (f <$> e)
+
 filterE :: (a -> Bool) -> E a -> E a
-filterE f e = FilterE f e
+filterE p e = maybeE (\x -> if p x then Just x else Nothing) e
 
 newEdgeEvent :: X a -> (a -> a -> Maybe b) -> IO (E b)
 newEdgeEvent x diff = do
@@ -179,3 +194,21 @@ waitE e0 = do
   e <- dupE e0
   readE e
 
+debugX :: (Eq a, Show a) => X a -> IO ()
+debugX x = newEdgeHandler x diff print where
+  diff a b = if a == b then Nothing else Just b
+
+newTime :: IO (X Double)
+newTime = do
+  t0 <- getCurrentTime
+  (write, time) <- newX 0
+  (forkIO . forever) $ do
+    putStrLn "time"
+    t1 <- getCurrentTime
+    let delta = realToFrac (diffUTCTime t1 t0)
+    write delta
+    threadDelay 16000
+  return time
+
+newTrap :: E a -> a -> IO (X a)
+newTrap e x0 = newAccumulator e x0 (\x _ -> x)

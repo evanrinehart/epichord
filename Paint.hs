@@ -10,6 +10,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding
 import Data.Monoid
+import Control.Monad
 import Data.List
 import Foreign.Storable
 import Data.IORef
@@ -18,6 +19,8 @@ import Data.Vector.Storable (Vector)
 import qualified Data.Vector.Storable as V
 import Data.Word
 import Codec.Picture
+import Control.Concurrent.STM
+import Control.Concurrent
 
 import Rect
 import R2
@@ -143,9 +146,9 @@ compilePaintCommands ps =
   mconcat (map encode ps) 
 
 newPaintOut :: Handle -> [Paint] -> IO ()
-newPaintOut h x = do
-  (hPutBuilder h . compilePaintCommands) x
-  hPutStrLn h "flush"
+newPaintOut h x = (hPutBuilder h . compilePaintCommands) x
+
+hPaintOut = newPaintOut
 
 translatePaint :: Paint -> Z2 -> Paint
 translatePaint p delta = case p of
@@ -157,3 +160,29 @@ translatePaint p delta = case p of
   Label x t -> Label (x .+. delta) t
   other -> other
 
+-- we have a thread throttling the paint flushing
+newPaintWorker :: Handle -> IO ([Paint] -> IO ())
+newPaintWorker h = do
+  ch <- atomically newTChan
+  tv <- atomically (newTVar False)
+  forkIO (flusher tv ch)
+  forkIO (painter h ch)
+  return $ \cmds -> atomically $ do
+    writeTChan ch (Just cmds)
+    writeTVar tv True
+
+painter :: Handle -> TChan (Maybe [Paint]) -> IO a
+painter h ch = forever $ do
+  m <- atomically (readTChan ch)
+  case m of
+    Nothing -> hPutStrLn h "flush"
+    Just cmds -> hPaintOut h cmds
+
+flusher :: TVar Bool -> TChan (Maybe [Paint]) -> IO a
+flusher tv ch = forever $ do
+  atomically $ do
+    x <- readTVar tv
+    when (x == False) retry
+    writeTChan ch Nothing
+    writeTVar tv False
+  threadDelay 16000
