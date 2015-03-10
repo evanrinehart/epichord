@@ -66,3 +66,12 @@ encodeCommand c = case c of
   CutAll -> "cut-all"
   Exit -> "exit"
   Crash -> "crash"
+
+newPlayer :: (PlayerCommand -> IO ()) -> IO (Int -> IO ())
+newPlayer dispatch = return $ \note -> do
+  forkIO $ do
+    dispatch (Execute 9 0 note 127)
+    threadDelay 1000000
+    --dispatch (Execute 8 0 note 127)
+  return ()
+

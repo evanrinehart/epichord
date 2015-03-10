@@ -1,24 +1,62 @@
 module Main where
 
 import Control.Applicative
+import Control.Monad
+import Data.Monoid
+import Control.Concurrent
+import System.IO
 
-import App
 import Demo
 import X
+import R2
+import Paint
+import Input
+import Util
+import Config
+import Input
+import Sound
+import Chart
+import Rect
 
 main :: IO ()
-main = setupWith $ \mouse click window newRepainter play -> do
+main = do
+  (paintOutH, eventInH, dim0) <- parseCommandLineOptions
   putStrLn "CORE Hello World"
-  let rects = liftA2 layout (pure (0,0)) window
-  let chart = fromLayout <$> rects
-  let hover = liftA2 overQuad mouse chart
-  let select = snapshot_ click hover
-  selection <- newTrap (Just <$> select) Nothing
-  newEventHandler select $ \n -> do
-    case n of
-      0 -> play 62
-      1 -> play 63
-      2 -> play 67
-      3 -> play 70
-  let simon = liftA2 Simon selection rects
-  newRepainter simon simonView
+  paint <- newPaintWorker paintOutH
+  (soundA, soundB, soundC) <- newSoundController
+  play <- newPlayer soundA
+  (notifyBoot, boot) <- newE
+  (mouse, click, window, quit) <- loadRaws eventInH dim0
+  let outs = program mouse click window paint play boot
+  runProgram (notifyBoot ()) quit outs
+
+program :: X R2
+        -> E MouseButton
+        -> X R2
+        -> ([Paint] -> IO ())
+        -> (Int -> IO ())
+        -> E ()
+        -> [Output]
+program mouse click window paint play boot = outs where
+  outs = [sound, picture]
+  sound = out select (play . note)
+  select = snapshot_ click hover       :: E Int
+  hover = liftA2 overQuad mouse chart  :: X Int
+  chart = fmap fromLayout rects        :: X (Chart R2 Int)
+  rects = liftA2 layout zero window    :: X [(Rect Double, Int)]
+  picture = view simon simonView
+  simon = liftA2 Simon selection rects :: X Simon
+  selection = accumulate select Nothing (\n _ -> Just n) :: X (Maybe Int)
+  view = repainter paint boot
+  zero = pure (0,0) :: X (Double, Double)
+
+note :: Int -> Int
+note 0 = 62
+note 1 = 63
+note 2 = 67
+note 3 = 70
+note _ = 64
+
+repainter :: Eq a => ([Paint] -> IO ()) -> E () -> X a -> (a -> [Paint]) -> Output
+repainter paint repaint x look = 
+  out (edge x diff <> snapshot_ repaint x) (paint . look)

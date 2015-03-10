@@ -3,6 +3,7 @@
 module X (
   X,
   E,
+  Output,
   newX,
   newE,
   snapshot,
@@ -10,14 +11,12 @@ module X (
   filterE,
   justE,
   maybeE,
-  newEdgeEvent,
-  newEdgeHandler,
-  newAccumulator,
-  newEventHandler,
-  waitE,
-  newTime,
-  newTrap,
-  debugX
+  edge,
+  accumulate,
+  out,
+  runProgram,
+  debugX,
+  debugE
 ) where
 
 import Control.Applicative
@@ -30,6 +29,7 @@ import Control.Concurrent
 import Control.Concurrent.STM
 import Data.Function
 import Data.Time
+import System.IO.Unsafe
 
 data X a where
   PureX :: a -> X a
@@ -45,6 +45,8 @@ data E a where
   SnapshotE :: E b -> X a -> E a
   PortE     :: TChan a -> E a
   JustE     :: E (Maybe a) -> E a
+
+type Output = IO ()
 
 instance Functor X where
   fmap f x = FmapX f x
@@ -118,18 +120,26 @@ hang = do
   threadDelay (100 * 10^(6::Int))
   hang
 
+diff :: Eq a => a -> a -> Maybe a
+diff a b = if a == b then Nothing else Just b
+
+forkOut :: Output -> IO ()
+forkOut act = do
+  forkIO act
+  return ()
+
 ---
 
 newX :: a -> IO (a -> IO (), X a)
 newX v0 = do
-  tv <- atomically (newTVar v0)
+  tv <- newTVarIO v0
   return
     ( \x -> atomically (writeTVar tv x)
     , PortX tv )
 
 newE :: IO (a -> IO (), E a)
 newE = do
-  ch <- atomically newBroadcastTChan
+  ch <- newBroadcastTChanIO
   return
     ( \x -> atomically (writeTChan ch x)
     , PortE ch )
@@ -149,66 +159,61 @@ maybeE f e = justE (f <$> e)
 filterE :: (a -> Bool) -> E a -> E a
 filterE p e = maybeE (\x -> if p x then Just x else Nothing) e
 
-newEdgeEvent :: X a -> (a -> a -> Maybe b) -> IO (E b)
-newEdgeEvent x diff = do
-  (writeOut, e) <- newE
-  newEdgeHandler x diff writeOut
-  return e
+edge :: X a -> (a -> a -> Maybe b) -> E b
+edge x diff = PortE ch where
+  ch = unsafePerformIO $ do
+    out <- newBroadcastTChanIO
+    forkIO $ do
+      v0 <- atomically (readX x)
+      ref <- newIORef v0
+      forever $ do
+        v <- readIORef ref
+        (d, v') <- atomically $ do
+          v' <- readX x
+          case diff v v' of
+            Just d  -> return (d, v')
+            Nothing -> retry
+        writeIORef ref v'
+        atomically (writeTChan out d)
+    return out
 
-newEdgeHandler :: X a -> (a -> a -> Maybe b) -> (b -> IO ()) -> IO ()
-newEdgeHandler x diff act = do
-  v0 <- atomically (readX x)
-  ref <- newIORef v0
-  forkIO $ forever $ do
-    v <- readIORef ref
-    (d, v') <- atomically $ do
-      v' <- readX x
-      case diff v v' of
-        Just d  -> return (d, v')
-        Nothing -> retry
-    writeIORef ref v'
-    act d
-  return ()
-
-newAccumulator :: E a -> s -> (a -> s -> s) -> IO (X s)
-newAccumulator e0 s0 trans = do
-  ref <- newIORef s0
-  (writeOut, out) <- newX s0
-  newEventHandler e0 $ \x -> do
-    s <- readIORef ref
-    let s' = trans x s
-    writeIORef ref s'
-    writeOut s'
-  return out
-
-newEventHandler :: E a -> (a -> IO ()) -> IO ()
-newEventHandler e0 act = do
+out :: E a -> (a -> IO ()) -> Output
+out e0 act = do
   e <- dupE e0
-  forkIO $ forever $ do
-    x <- readE e
-    act x
-  return ()
+  forever (readE e >>= act)
+
+accumulate :: E a -> s -> (a -> s -> s) -> X s
+accumulate e0 s0 trans = PortX tv where
+  tv = unsafePerformIO $ do
+    state <- newTVarIO s0
+    forkIO $ do
+      e <- dupE e0
+      forever $ do
+        x <- readE e
+        atomically $ do
+          s <- readTVar state
+          let s' = trans x s
+          writeTVar state s'
+    return state
 
 waitE :: E a -> IO a
 waitE e0 = do
   e <- dupE e0
   readE e
 
-debugX :: (Eq a, Show a) => X a -> IO ()
-debugX x = newEdgeHandler x diff print where
-  diff a b = if a == b then Nothing else Just b
+debugX :: (Eq a, Show a) => X a -> Output
+debugX x = do
+  v0 <- atomically (readX x)
+  print v0
+  out (edge x diff) print
 
-newTime :: IO (X Double)
-newTime = do
-  t0 <- getCurrentTime
-  (write, time) <- newX 0
-  (forkIO . forever) $ do
-    putStrLn "time"
-    t1 <- getCurrentTime
-    let delta = realToFrac (diffUTCTime t1 t0)
-    write delta
-    threadDelay 16000
-  return time
+debugE :: (Show a) => E a -> Output
+debugE e = do
+  out e print
 
-newTrap :: E a -> a -> IO (X a)
-newTrap e x0 = newAccumulator e x0 (\x _ -> x)
+runProgram :: IO () -> E () -> [Output] -> IO ()
+runProgram notifyBoot stop outs = do
+  forM_ outs forkOut
+  threadDelay 5000
+  notifyBoot
+  waitE stop
