@@ -1,22 +1,25 @@
+-- | Small experimental library for interactive functional programs.
+
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE RankNTypes #-}
 module X (
   X,
   E,
-  Output,
-  newX,
-  newE,
+  Output(..),
+  runProgram,
+  edge,
+  accumulate,
   snapshot,
   snapshot_,
+  out,
   filterE,
   justE,
   maybeE,
-  edge,
-  accumulate,
-  out,
-  runProgram,
+  never,
   debugX,
-  debugE
+  debugE,
+  newX,
+  newE
 ) where
 
 import Control.Applicative
@@ -28,25 +31,27 @@ import Data.IORef
 import Control.Concurrent
 import Control.Concurrent.STM
 import Data.Function
-import Data.Time
 import System.IO.Unsafe
 
+-- | A value of type a that varies.
 data X a where
   PureX :: a -> X a
   FmapX :: forall a b . (b -> a) -> X b -> X a
   ApplX :: forall a b . X (b -> a) -> X b -> X a
   PortX :: TVar a -> X a
 
+-- | An event that carries values of type a when it occurs.
 data E a where
   NeverE    :: E a
   FmapE     :: forall a b . (b -> a) -> E b -> E a
   MappendE  :: E a -> E a -> E a
   ProductE  :: (b -> c -> a) -> E b -> E c -> E a
   SnapshotE :: E b -> X a -> E a
-  PortE     :: TChan a -> E a
   JustE     :: E (Maybe a) -> E a
+  PortE     :: TChan a -> E a
 
-type Output = IO ()
+-- | A special IO action which will react to events. See 'out'.
+newtype Output = Output (IO ())
 
 instance Functor X where
   fmap f x = FmapX f x
@@ -120,16 +125,21 @@ hang = do
   threadDelay (100 * 10^(6::Int))
   hang
 
-diff :: Eq a => a -> a -> Maybe a
-diff a b = if a == b then Nothing else Just b
+waitE :: E a -> IO a
+waitE e0 = do
+  e <- dupE e0
+  readE e
 
-forkOut :: Output -> IO ()
-forkOut act = do
-  forkIO act
-  return ()
+runEvent :: E a -> (a -> IO ()) -> IO ()
+runEvent e0 act = do
+  e <- dupE e0
+  forever (readE e >>= act)
 
 ---
 
+-- | Create a new signal with an initial value. Get back an IO action to
+-- change the value of the signal. This is the only way the signal will
+-- change.
 newX :: a -> IO (a -> IO (), X a)
 newX v0 = do
   tv <- newTVarIO v0
@@ -137,6 +147,7 @@ newX v0 = do
     ( \x -> atomically (writeTVar tv x)
     , PortX tv )
 
+-- | Create a new event and the associated IO action to trigger the event.
 newE :: IO (a -> IO (), E a)
 newE = do
   ch <- newBroadcastTChanIO
@@ -144,21 +155,33 @@ newE = do
     ( \x -> atomically (writeTChan ch x)
     , PortE ch )
 
+-- | An event which gets the value of a signal when another event occurs.
 snapshot :: E a -> X b -> E (a,b)
 snapshot e x = ProductE (,) e (SnapshotE e x)
 
+-- | Like snapshot but ignores the original event's payload.
 snapshot_ :: E a -> X b -> E b
 snapshot_ e x = SnapshotE e x
 
+-- | Filter out events with the value of Nothing.
 justE :: E (Maybe a) -> E a
 justE = JustE
 
+-- | Filter out events using a Maybe function.
 maybeE :: (a -> Maybe b) -> E a -> E b
 maybeE f e = justE (f <$> e)
 
+-- | Filter out events using a Bool function.
 filterE :: (a -> Bool) -> E a -> E a
 filterE p e = maybeE (\x -> if p x then Just x else Nothing) e
 
+-- | An event that never happens.
+never :: E a
+never = mempty
+
+-- | Events will occur when an "edge" is detected in a signal. The detection
+-- algorithm checks the two values before and after a discrete change in
+-- the signal.
 edge :: X a -> (a -> a -> Maybe b) -> E b
 edge x diff = PortE ch where
   ch = unsafePerformIO $ do
@@ -177,11 +200,7 @@ edge x diff = PortE ch where
         atomically (writeTChan out d)
     return out
 
-out :: E a -> (a -> IO ()) -> Output
-out e0 act = do
-  e <- dupE e0
-  forever (readE e >>= act)
-
+-- | Create a signal out of an input event and a state machine.
 accumulate :: E a -> s -> (a -> s -> s) -> X s
 accumulate e0 s0 trans = PortX tv where
   tv = unsafePerformIO $ do
@@ -196,24 +215,34 @@ accumulate e0 s0 trans = PortX tv where
           writeTVar state s'
     return state
 
-waitE :: E a -> IO a
-waitE e0 = do
-  e <- dupE e0
-  readE e
+-- | A handler for events.
+out :: E a -> (a -> IO ()) -> Output
+out e0 act = Output (runEvent e0 act)
 
+-- | Prints the values of a signal as they change.
 debugX :: (Eq a, Show a) => X a -> Output
-debugX x = do
+debugX x = Output $ do
   v0 <- atomically (readX x)
   print v0
-  out (edge x diff) print
+  let diff a b = if a == b then Nothing else Just b
+  runEvent (edge x diff) print
 
+-- | Prints the values of events as they occur.
 debugE :: (Show a) => E a -> Output
-debugE e = do
-  out e print
+debugE e = out e print
 
-runProgram :: IO () -> E () -> [Output] -> IO ()
+-- | Run a set of Outputs. This spawns several threads then waits for an
+-- event. The output threads will then be killed to stop further processing.
+-- However other threads which no longer have any effect will probably remain,
+-- taking up resources. After threads have been spawned but before waiting,
+-- the given "boot" action will be executed.
+runProgram :: IO () -- ^ action to execute after initialization
+           -> E ()  -- ^ event that will shutdown the system
+           -> [Output] -- ^ set of output event handlers to run
+           -> IO ()
 runProgram notifyBoot stop outs = do
-  forM_ outs forkOut
+  tids <- forM outs (\(Output io) -> forkIO io)
   threadDelay 5000
   notifyBoot
   waitE stop
+  forM_ tids killThread
