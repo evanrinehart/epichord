@@ -2,7 +2,6 @@ module Demo where
 
 import Data.Monoid
 
-import X
 import R2
 import Util
 import Paint

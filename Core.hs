@@ -8,7 +8,7 @@ import System.IO
 import System.Exit
 
 import Demo
-import X
+import Control.Broccoli
 import R2
 import Paint
 import Input

@@ -15,7 +15,6 @@ import Control.Concurrent
 import R2
 import qualified Keys as K
 import Keys (Key)
-import X
 
 data RawInput =
   Mouse Double Double |
@@ -152,5 +151,6 @@ inputWorker h mouse click window quit =
     Quit -> quit ()
 --    Character c -> char c
 --    Wheel w -> wheel w
-    e -> print e
+--    e -> print e
+    _ -> return ()
 
