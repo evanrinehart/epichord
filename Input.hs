@@ -38,17 +38,6 @@ data RawInput =
 newtype MouseButton = MouseButton Int
   deriving (Show, Eq, Ord)
 
-data Raws = Raws
-  { rawMouse :: X R2
-  , rawWindowSize :: X R2
-  , rawClick :: E MouseButton
-  , rawRelease :: E MouseButton
-  , rawWheel :: E Double
-  , rawKeydown :: E Key
-  , rawKeyup :: E Key
-  , rawChar :: E Char
-  , rawQuit :: E () }
-
 quickParse :: String -> Parser a -> Maybe a
 quickParse s parser =
   let e = parse parser "raw input" s in
@@ -146,40 +135,22 @@ handleEvents h eat = forever $ do
     Nothing -> hPutStrLn stderr ("** CORE unrecognized input " ++ line)
     Just r -> eat r
 
--- -- --
-
-newRaws :: Handle -> (Double, Double) -> IO Raws
-newRaws h dim = do
-  (setMouseLoc, mouse) <- newX (0,0)
-  (setWindowSize, window) <- newX dim
-  (doClick, click) <- newE
-  (doRelease, release) <- newE
-  (doChar, character) <- newE
-  (pressKey, keydown) <- newE
-  (releaseKey, keyup) <- newE
-  (doWheel, wheel) <- newE
-  (doQuit, quit) <- newE
-  forkIO $ handleEvents h $ \i -> do
-    case i of
-      Mouse x y -> setMouseLoc (x,y)
-      Resize w h -> setWindowSize (realToFrac w, realToFrac h)
-      Click mb -> doClick mb
-      Release mb -> doRelease mb
-      KeyDown k -> pressKey k
-      KeyUp k -> releaseKey k
-      Quit -> doQuit ()
-      Character c -> doChar c
-      Wheel w -> doWheel w
-      e -> print e
-  return $
-    Raws mouse window click release wheel keydown keyup character quit
-
-loadRaws :: Handle -> R2 -> IO (X R2, E MouseButton, X R2, E ())
-loadRaws h dim = do
-  raws <- newRaws h dim
-  return
-    ( rawMouse raws
-    , rawClick raws
-    , rawWindowSize raws
-    , rawQuit raws )
+inputWorker :: Handle
+            -> (R2 -> IO ())
+            -> (MouseButton -> IO ())
+            -> (R2 -> IO ())
+            -> (() -> IO ())
+            -> IO ()
+inputWorker h mouse click window quit =
+  handleEvents h $ \i -> case i of
+    Mouse x y -> mouse (x,y)
+    Resize w h -> window (realToFrac w, realToFrac h)
+    Click mb -> click mb
+--    Release mb -> release mb
+--    KeyDown k -> keydown k
+--    KeyUp k -> keyup k
+    Quit -> quit ()
+--    Character c -> char c
+--    Wheel w -> wheel w
+    e -> print e
 
