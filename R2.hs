@@ -1,6 +1,7 @@
 module R2 where
 
-type R2 = (Double, Double)
+type R = Double
+type R2 = (R,R)
 type Z2 = (Int, Int)
 type N2 = Z2
 

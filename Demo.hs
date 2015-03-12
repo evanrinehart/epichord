@@ -9,28 +9,28 @@ import Chart
 import Rect
 
 -- the model is a bunch of numbered rectangles
-layout :: R2 -> R2 -> [(Rect Double, Int)]
-layout (x,y) (w,h) = [(r1,0), (r2,1), (r3,2), (r4,3)] where
-  (w2, h2) = (w / 2, h / 2)
-  r1 = Rect x y w2 h2
-  r2 = Rect (x+w2) y (w2+1) h2
-  r3 = Rect x (y+h2) w2 (h2+1)
-  r4 = Rect (x+w2) (y+h2) (w2+1) (h2+1)
+layout :: Rect () -> [Rect Int]
+layout area@(Rect _ l t r b) = [r0, r1, r2, r3] where
+  (mx, my) = midpoint area
+  r0 = Rect 0 l t mx my
+  r1 = Rect 1 mx t r my
+  r2 = Rect 2 l my mx b
+  r3 = Rect 3 mx my r b
 
 -- the chart is a function of the model
-fromLayout :: [(Rect Double, Int)] -> Chart R2 Int
-fromLayout rects = mconcat (map (\(r,i) -> rect r i) rects)
+fromLayout :: [Rect Int] -> Chart R2 Int
+fromLayout = mconcat . map rect
 
 -- the hovered number is a function of the mouse and chart
 overQuad :: R2 -> Chart R2 Int -> Int
-overQuad xy ch = atDefault ch xy 0
+overQuad xy ch = at ch xy 0
 
 -- the view is a function of the widgets state
 -- we dont use a signal of [Paint] because the image data might be too large
 -- to detect changes in
 simonView :: Simon -> [Paint]
 simonView (Simon sel rects) = map f rects where
-  f (r,c) = Fill (floorR r) (g c sel)
+  f r = Fill (void r) (g (value r) sel)
   g 0 (Just 0) = (255, 0, 0)
   g 1 (Just 1) = (255, 255, 0)
   g 2 (Just 2) = (0, 0, 255)
@@ -43,6 +43,6 @@ simonView (Simon sel rects) = map f rects where
 -- a widgets state
 data Simon = Simon
   { selection :: Maybe Int
-  , rects :: [(Rect Double, Int)] }
+  , rects :: [Rect Int] }
     deriving (Show, Eq)
 

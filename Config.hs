@@ -6,21 +6,24 @@ import Options.Applicative
 import Data.Monoid
 import Data.Maybe
 
+import Rect
+
 data CommandLineOptions = CommandLineOptions
   { paintToFd :: Maybe Int
   , eventsFromFd :: Maybe Int
-  , windowDimensions :: (Double, Double) }
+  , windowDimensions :: (Double,Double) }
     deriving (Show)
 
-parseCommandLineOptions :: IO (Handle, Handle, (Double, Double))
+parseCommandLineOptions :: IO (Handle, Handle, Rect ())
 parseCommandLineOptions = do
-  CommandLineOptions p e dim <- parseRawCommandLineOptions
+  CommandLineOptions p e (w,h) <- parseRawCommandLineOptions
   p' <- maybe (return stdout) (fdToHandle . Fd . fromIntegral) p
   e' <- maybe (return stdin)  (fdToHandle . Fd . fromIntegral) e
+  let window0 = Rect () 0 0 (realToFrac w) (realToFrac h)
   hSetEncoding e' utf8
   hSetEncoding p' utf8
   hSetBuffering p' LineBuffering
-  return (p', e', dim)
+  return (p', e', window0)
 
 parseRawCommandLineOptions :: IO CommandLineOptions
 parseRawCommandLineOptions = execParser (info (helper <*> optParser) description)
@@ -51,6 +54,7 @@ eventsFrom =
   metavar "FD" <>
   help "File descriptor provided by parent process for reading input events"
 
+windowDimensionsParser :: Mod OptionFields (Double, Double)
 windowDimensionsParser =
   long "window" <>
   short 'w' <>

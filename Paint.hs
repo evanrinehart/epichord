@@ -30,13 +30,13 @@ type Pixmap = Image PixelRGB8
 type Painter = [Paint] -> IO ()
 
 data Paint =
-  Fill (Rect Int) Color |
-  Box (Rect Int) Color |
-  Line Z2 Z2 Color |
-  Blit Z2 Pixmap |
+  Fill (Rect ()) Color |
+  Box (Rect ()) Color |
+  Line R2 R2 Color |
+  Blit R2 Pixmap |
   Upload Int Pixmap |
-  PutImage Z2 Int |
-  Label Z2 Text |
+  PutImage R2 Int |
+  Label R2 Text |
   FilePicker |
   Copy Text |
   SetCursor Cursor
@@ -124,18 +124,38 @@ newline = word8 0x0a
 sp2nl :: Char -> Char
 sp2nl '\n' = ' '
 sp2nl x = x
+
+encodeRect :: Rect a -> Builder
+encodeRect (Rect _ l t r b) =
+  intDec (round l) <> space <>
+  intDec (round t) <> space <>
+  intDec (round (r-l)) <> space <>
+  intDec (round (b-t))
+
+encodeRectF :: Rect a -> Builder
+encodeRectF (Rect _ l t r b) =
+  doubleDec l <> space <>
+  doubleDec t <> space <>
+  doubleDec (r-l) <> space <>
+  doubleDec (b-t)
+
+encodeRGB :: Color -> Builder
+encodeRGB (r,g,b) = intDec r <> space <> intDec g <> space <> intDec b
+
+encodeR2 :: R2 -> Builder
+encodeR2 (x,y) = intDec (floor x) <> space <> intDec (floor y)
   
 encodePaintCommand :: Paint -> Builder
 encodePaintCommand p = mconcat (intersperse space words) where
   words = case p of
-    Line (x,y) (u,v) (r,g,b) -> "line" : map intDec [x,y,u,v,r,g,b]
-    Fill (Rect x y w h) (r,g,b)    -> "fill" : map intDec [x,y,w,h,r,g,b]
-    Box (Rect x y w h) (r,g,b)     -> "box"  : map intDec [x,y,w,h,r,g,b]
-    Blit (x,y) img -> ["blit", intDec x, intDec y, encodePixmap img]
+    Line xy1 xy2 rgb -> ["line", encodeR2 xy1, encodeR2 xy2, encodeRGB rgb]
+    Fill r rgb -> ["fill", encodeRectF r, encodeRGB rgb]
+    Box r rgb -> ["box", encodeRect r, encodeRGB rgb]
+    Blit xy img -> ["blit", encodeR2 xy, encodePixmap img]
     Upload n img -> ["upload", intDec n, encodePixmap img]
-    PutImage (x,y) n -> ["image", intDec x, intDec y, intDec n]
-    Label (x,y) s ->
-      ["label", intDec x, intDec y, byteString . encodeUtf8 . T.map sp2nl $ s]
+    PutImage xy n -> ["image" , encodeR2 xy, intDec n]
+    Label xy s ->
+      ["label", encodeR2 xy, (byteString . encodeUtf8 . T.map sp2nl) s]
     FilePicker -> ["file-picker"]
     Copy s -> ["copy", byteString (encodeUtf8 s)]
     SetCursor c -> ["cursor"]
@@ -150,6 +170,7 @@ newPaintOut h x = (hPutBuilder h . compilePaintCommands) x
 
 hPaintOut = newPaintOut
 
+{-
 translatePaint :: Paint -> Z2 -> Paint
 translatePaint p delta = case p of
   Fill r c -> Fill (r `translateRect` delta) c
@@ -159,6 +180,7 @@ translatePaint p delta = case p of
   PutImage x n -> PutImage (x .+. delta) n
   Label x t -> Label (x .+. delta) t
   other -> other
+-}
 
 -- we have a thread throttling the paint flushing
 newPaintWorker :: Handle -> IO ([Paint] -> IO ())

@@ -13,6 +13,7 @@ import Data.Char
 import Control.Concurrent
 
 import R2
+import Rect
 import qualified Keys as K
 import Keys (Key)
 
@@ -137,15 +138,16 @@ handleEvents h eat = forever $ do
 inputWorker :: Handle
             -> (R2 -> IO ())
             -> (MouseButton -> IO ())
-            -> (R2 -> IO ())
+            -> (MouseButton -> IO ())
+            -> (Rect () -> IO ())
             -> (() -> IO ())
             -> IO ()
-inputWorker h mouse click window quit =
+inputWorker h mouse click release window quit =
   handleEvents h $ \i -> case i of
     Mouse x y -> mouse (x,y)
-    Resize w h -> window (realToFrac w, realToFrac h)
+    Resize w h -> window (Rect () 0 0 (realToFrac w) (realToFrac h))
     Click mb -> click mb
---    Release mb -> release mb
+    Release mb -> release mb
 --    KeyDown k -> keydown k
 --    KeyUp k -> keyup k
     Quit -> quit ()

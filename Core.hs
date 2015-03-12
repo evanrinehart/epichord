@@ -8,6 +8,7 @@ import Control.Concurrent
 import System.IO
 import System.Exit
 import Data.Time
+import Data.Maybe
 
 import Demo
 import Control.Broccoli
@@ -20,10 +21,11 @@ import Input
 import Sound
 import Chart
 import Rect
+import Piano
 
 main :: IO ()
 main = do
-  (paintOutH, eventInH, dim0) <- parseCommandLineOptions
+  (paintOutH, eventInH, window0) <- parseCommandLineOptions
   putStrLn "CORE Hello World"
   paint <- newPaintWorker paintOutH
   (soundA, soundB, soundC) <- newSoundController
@@ -32,16 +34,19 @@ main = do
     (onBoot, boot)    <- newE 
     (mouse, setMouse) <- newX (0,0)
     (onClick, click)  <- newE
-    (window, resize)  <- newX dim0
+    (onRelease, release)  <- newE
+    (window, resize)  <- newX window0
     (onQuit, quit)    <- newE
     (time, tick)      <- newE
-    input (inputWorker eventInH setMouse click resize quit)
+    input (inputWorker eventInH setMouse click release resize quit)
     input (forever (threadDelay 1000000 >> getCurrentTime >>= tick))
-    let (picture, sound) = program mouse onClick window onBoot time
-    --output sound play
+    let (picture, sound, printer) =
+           program mouse onClick onRelease window onBoot time
+    output sound play
     --output sound print
     --output time print
     output picture paint
+    --output printer print
     return (boot (), onQuit)
 
 mkay :: Either UTCTime Int -> Int -> Int
@@ -50,29 +55,30 @@ mkay (Right m) _ = m
 
 program :: X R2
         -> E MouseButton
-        -> X R2
+        -> E MouseButton
+        -> X (Rect ())
         -> E ()
         -> E UTCTime
-        -> (E [Paint], E Note)
-program mouse click window boot time = (picture, sound) where
-  timeN = debugX $ accumulate (time <||> override) 0 mkay
-  override = (\x -> (x+2) `mod` 4) <$> snapshot_ click timeN
-  sound = note <$> select              :: E Note
-  ships = accumulate sound 0 (+)
-  offset = (,0) . realToFrac <$> ships
-  --select = snapshot_ click hover       :: E Int
-  select = never
-  hover = liftA2 overQuad mouse chart  :: X Int
-  chart = fmap fromLayout rects        :: X (Chart R2 Int)
-  rects = liftA2 layout offset window  :: X [(Rect Double, Int)]
-  picture = view simon simonView       :: E [Paint]
-  simon = liftA2 Simon selection rects :: X Simon
+        -> (E [Paint], E Note, E (Maybe PianoKey))
+program mouse click release window boot time = (picture, sound, printer) where
+  piano = pianoKeys <$> window <*> (pure 0) <*> ons :: X PianoKeys
+  chart = pianoChart <$> piano :: X (Chart R2 PianoKey)
+  hover = at' <$> chart <*> mouse :: X (Maybe PianoKey)
+  --picture = view piano (const (pure []))
+  repaint = snapshot_ (boot <> pianoChanged) (pianoView <$> piano)
+  down = pkNote <$> justE (snapshot_ click hover)
+  up = release
+  ons = accumulate (up <||> down) [] $ \e s -> case e of
+    Left _ -> []
+    Right note -> note : s
+  pianoChanged = () <$ edge piano diff
+  picture = repaint
+  sound = pkNote <$> justE (snapshot_ click hover)
+  printer = edge hover diff
+  --simon = liftA2 Simon selection rects :: X Simon
   --selection = accumulate select Nothing (\n _ -> Just n) :: X (Maybe Int)
-  selection = Just <$> timeN
-  view = repainter boot
-  zero = pure (0,0) :: X (Double, Double)
-
-type Note = Int
+  --selection = Just <$> timeN
+  --view = repainter boot
 
 note :: Int -> Note
 note 0 = 62

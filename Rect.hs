@@ -1,24 +1,39 @@
 module Rect where
 
+import Data.Functor
+
 import R2
 
+outsideRect :: R -> R -> Rect a -> Bool
+outsideRect x y (Rect _ l t r b) = x < l || x > r || y < t || y > b
+
+inRect :: R -> R -> Rect a -> Bool
+inRect x y r = not (outsideRect x y r)
+
 data Rect a = Rect
-  { top :: a
-  , left :: a
-  , width :: a
-  , height :: a }
+  { value :: a
+  , left :: R
+  , top :: R
+  , right :: R
+  , bottom :: R }
     deriving (Eq, Show)
 
-inRect :: (Num a, Ord a) => Rect a -> (a,a) -> Bool
-inRect r xy = not (outsideRect r xy)
+instance Functor Rect where
+  fmap f (Rect x l t r b) = Rect (f x) l t r b
 
-outsideRect :: (Num a, Ord a) => Rect a -> (a,a) -> Bool
-outsideRect (Rect x y w h) (x',y') =
-  x' < x ||
-  x' > x+w ||
-  y' < y ||
-  y' > y+h
+void :: Rect a -> Rect ()
+void = (() <$)
 
-translateRect :: Num a => Rect a -> (a,a) -> Rect a
-translateRect (Rect x y w h) (dx, dy) = Rect (x + dx) (y + dy) w h
+unit :: Rect ()
+unit = Rect () 0 0 1 1
 
+translateRect :: R -> R -> Rect a -> Rect a
+translateRect x y (Rect v l t r b) = Rect v (l+x) (t+y) (r+x) (b+y)
+
+scaleRect :: R -> R -> Rect a -> Rect a
+scaleRect u v (Rect a l t r b) = Rect a (l*u) (t*v) (r*u) (b*v)
+
+midpoint :: Rect a -> R2
+midpoint (Rect _ l t r b) = (x,y) where
+  x = (r - l) / 2
+  y = (b - t) / 2

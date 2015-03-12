@@ -16,7 +16,7 @@ void flushGraphics(){
   [context flushGraphics];
 }
 
-int clamp(int lower, int x, int upper){
+double clamp(double lower, double x, double upper){
   if(x < lower) return lower;
   else if(x > upper) return upper;
   else return x;
@@ -25,16 +25,16 @@ int clamp(int lower, int x, int upper){
 void paintBox(int x, int y, int w, int h, int r, int g, int b){
 }
 
-void paintFilledBox(int x, int y, int w, int h, int r, int g, int b){
+void paintFilledBox(double x, double y, double w, double h, int r, int g, int b){
   NSSize size = [[mainWindow contentView] frame].size;
   NSGraphicsContext* context = [NSGraphicsContext currentContext];
   CGContextRef port = [context graphicsPort];
-  int xx0 = clamp(0, x, size.width);
-  int xx1 = clamp(0, x+w, size.width);
-  int ww = xx1 - xx0;
-  int yy0 = clamp(0, y, size.height);
-  int yy1 = clamp(0, y+h, size.height);
-  int hh = yy1 - yy0;
+  double xx0 = clamp(0, x, size.width);
+  double xx1 = clamp(0, x+w, size.width);
+  double ww = xx1 - xx0;
+  double yy0 = clamp(0, y, size.height);
+  double yy1 = clamp(0, y+h, size.height);
+  double hh = yy1 - yy0;
   CGContextSetRGBFillColor(port, r/255.0, g/255.0, b/255.0, 1);
   CGContextFillRect(port, CGRectMake (xx0, size.height-yy0, ww, -hh));
 }
@@ -44,6 +44,7 @@ void executePaintCommand(){
   int base;
   int results;
   int args[8];
+  double fargs[8];
   //printf("executing paint command\n");
 
   paintBuffer[paintBufferPtr] = 0;
@@ -57,13 +58,13 @@ void executePaintCommand(){
   }
   base = strlen(command);
 
-  //printf("buffer = %s\n", paintBuffer);
+  printf("buffer = %s\n", paintBuffer);
   //printf("command = %s\n", command);
 
   if(strcmp(command, "fill")==0){
     results = sscanf(
-      (char*)paintBuffer+base, "%d %d %d %d %d %d %d",
-      &args[0], &args[1], &args[2], &args[3], &args[4], &args[5], &args[6]
+      (char*)paintBuffer+base, "%lf %lf %lf %lf %d %d %d",
+      &fargs[0], &fargs[1], &fargs[2], &fargs[3], &args[4], &args[5], &args[6]
     );
     if(results < 7){
       fprintf(stderr, "** VIDEO invalid fill command\n");
@@ -72,7 +73,7 @@ void executePaintCommand(){
     }
     else{
       paintFilledBox(
-        args[0], args[1], args[2], args[3],
+        fargs[0], fargs[1], fargs[2], fargs[3],
         args[4], args[5], args[6]
       );
     }
@@ -96,6 +97,9 @@ void appendToPaintBuffer(size_t count, const unsigned char* bytes){
   }
   //printf("\"");
     //printf("\n");
+
+  if(count == 0) return;
+
   if(paintBufferPtr + count >= paintBufferSize){
     printf("expanding paint buffer to %lu\n", paintBufferSize * 2);
     paintBuffer = realloc(paintBuffer, paintBufferSize * 2);
@@ -121,22 +125,27 @@ void paintIn(size_t count, const unsigned char* bytes){
     exit(-1);
   }
 
-  //printf("paintIn %lu\n", count);
+  printf("paintIn %lu\n", count);
+  /*
+  fprintf(stderr, "(");
+  for(int z=0; z<count; z++){
+    fprintf(stderr, "%c", bytes[z]);
+  }
+  fprintf(stderr, ")\n");
+  */
 
   for(;;){
     if(bytes[i] == '\n'){
-      //printf("newline found at i=%d (j=%d)\n", i, j);
-      if(i-j > 0){
-        appendToPaintBuffer(i-j, bytes+j);
-        executePaintCommand();
-      }
+      printf("newline found at i=%d (j=%d)\n", i, j);
+      appendToPaintBuffer(i-j, bytes+j);
+      executePaintCommand();
       i++;
       j=i;
 
       if(i==count) return;
     }
     else if(i == count - 1){
-      //printf("no newline found i=%d j=%d\n", i, j);
+      printf("no newline found i=%d j=%d\n", i, j);
       appendToPaintBuffer(i-j+1, bytes+j);
       return;
     }
