@@ -42,8 +42,10 @@ void paintFilledBox(double x, double y, double w, double h, int r, int g, int b)
 void setClip(double x, double y, double w, double h){
   NSSize size = [[mainWindow contentView] frame].size;
   NSRect rect;
+  [NSGraphicsContext restoreGraphicsState];
+  [NSGraphicsContext saveGraphicsState];
   rect.origin.x = x;
-  rect.origin.y = size.height - h;
+  rect.origin.y = size.height - (y + h);
   rect.size.width = w;
   rect.size.height = h;
   NSRectClip(rect);
