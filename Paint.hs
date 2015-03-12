@@ -30,8 +30,8 @@ type Pixmap = Image PixelRGB8
 type Painter = [Paint] -> IO ()
 
 data Paint =
-  Fill (Rect ()) Color |
-  Box (Rect ()) Color |
+  Fill Frame Color |
+  Box Frame Color |
   Line R2 R2 Color |
   Blit R2 Pixmap |
   Upload Int Pixmap |
@@ -39,6 +39,7 @@ data Paint =
   Label R2 Text |
   FilePicker |
   Copy Text |
+  Clip Frame |
   SetCursor Cursor
 
 showPaint :: Paint -> String
@@ -53,6 +54,7 @@ showPaint p = case p of
   FilePicker -> "FilePicker"
   Copy txt -> "Copy " ++ show txt
   SetCursor c -> "SetCursor " ++ show c
+  Clip r -> "Clip " ++ show r
 
 data Cursor =
   CursorDefault |
@@ -159,6 +161,7 @@ encodePaintCommand p = mconcat (intersperse space words) where
     FilePicker -> ["file-picker"]
     Copy s -> ["copy", byteString (encodeUtf8 s)]
     SetCursor c -> ["cursor"]
+    Clip r -> ["clip", encodeRect r]
 
 compilePaintCommands :: [Paint] -> Builder
 compilePaintCommands ps =

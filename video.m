@@ -39,6 +39,16 @@ void paintFilledBox(double x, double y, double w, double h, int r, int g, int b)
   CGContextFillRect(port, CGRectMake (xx0, size.height-yy0, ww, -hh));
 }
 
+void setClip(double x, double y, double w, double h){
+  NSSize size = [[mainWindow contentView] frame].size;
+  NSRect rect;
+  rect.origin.x = x;
+  rect.origin.y = size.height - h;
+  rect.size.width = w;
+  rect.size.height = h;
+  NSRectClip(rect);
+}
+
 void executePaintCommand(){
   char command[32];
   int base;
@@ -58,7 +68,7 @@ void executePaintCommand(){
   }
   base = strlen(command);
 
-  printf("buffer = %s\n", paintBuffer);
+  //printf("buffer = %s\n", paintBuffer);
   //printf("command = %s\n", command);
 
   if(strcmp(command, "fill")==0){
@@ -77,6 +87,18 @@ void executePaintCommand(){
         args[4], args[5], args[6]
       );
     }
+  }
+  else if(strcmp(command, "clip")==0){
+    results = sscanf(
+      (char*)paintBuffer+base, "%lf %lf %lf %lf",
+      &fargs[0], &fargs[1], &fargs[2], &fargs[3]
+    );
+    if(results < 4){
+      fprintf(stderr, "** VIDEO invalid clip command\n");
+      paintBufferPtr = 0;
+      return;
+    }
+    else{ setClip(fargs[0], fargs[1], fargs[2], fargs[3]); }
   }
   else if(strcmp(command, "flush")==0){
     flushGraphics();
@@ -125,7 +147,7 @@ void paintIn(size_t count, const unsigned char* bytes){
     exit(-1);
   }
 
-  printf("paintIn %lu\n", count);
+  //printf("paintIn %lu\n", count);
   /*
   fprintf(stderr, "(");
   for(int z=0; z<count; z++){
@@ -136,7 +158,7 @@ void paintIn(size_t count, const unsigned char* bytes){
 
   for(;;){
     if(bytes[i] == '\n'){
-      printf("newline found at i=%d (j=%d)\n", i, j);
+      //printf("newline found at i=%d (j=%d)\n", i, j);
       appendToPaintBuffer(i-j, bytes+j);
       executePaintCommand();
       i++;
@@ -145,7 +167,7 @@ void paintIn(size_t count, const unsigned char* bytes){
       if(i==count) return;
     }
     else if(i == count - 1){
-      printf("no newline found i=%d j=%d\n", i, j);
+      //printf("no newline found i=%d j=%d\n", i, j);
       appendToPaintBuffer(i-j+1, bytes+j);
       return;
     }

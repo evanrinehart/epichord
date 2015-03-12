@@ -21,6 +21,8 @@ data Rect a = Rect
 instance Functor Rect where
   fmap f (Rect x l t r b) = Rect (f x) l t r b
 
+type Frame = Rect ()
+
 void :: Rect a -> Rect ()
 void = (() <$)
 

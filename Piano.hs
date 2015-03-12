@@ -33,12 +33,15 @@ pianoChart (PianoKeys bound whs bls) =
 
 pianoView :: PianoKeys -> [Paint]
 pianoView (PianoKeys bound whs bls) =
-  [blank] ++ colors ++ lines ++ blacks where
+  [clipOn, blank] ++ colors1 ++ lines ++ blacks ++ colors2 where
+  clipOn = Clip bound
   blank = Fill bound (255,255,255)
-  colors = map (\(Rect _ l t r b) -> Fill (Rect () l t r b) (64,64,128))
+  colors1 = map (\(Rect _ l t r b) -> Fill (Rect () l t r b) (64,64,128))
     (filter (\(Rect k _ _ _ _) -> pkOnOff k == On) whs)
   lines = map (\(Rect _ l t r b) -> Fill (Rect () l t r (t+1)) (0,0,0)) whs
   blacks = map (\r -> Fill (void r) (0,0,0)) bls
+  colors2 = map (\(Rect _ l t r b) -> Fill (Rect () l t r b) (128,128,128))
+    (filter (\(Rect k _ _ _ _) -> pkOnOff k == On) bls)
 
 count = length
 
@@ -49,9 +52,13 @@ whatsOn (PianoKeys _ whs bls) = map noteOf
 
 moveKey :: Rect () -> R -> Rect a -> Rect a
 moveKey (Rect _ l t r b) scroll =
-  translateRect 0 (-scroll) .
+  let heightOfKey = (r - l) / 6 in
+  let heightOfKeyboard = heightOfKey * r2f whiteCount in
+  let halfViewportHeight = (b - t) / 2 in
+  let verticalOffset = scroll*heightOfKeyboard - halfViewportHeight in
   translateRect l t .
-  scaleRect (r - l) (b - t)
+  translateRect 0 (-verticalOffset) .
+  scaleRect (r - l) heightOfKeyboard
 
 pianoKeys :: Rect () -> Double -> [Note] -> PianoKeys
 pianoKeys area shift ons = PianoKeys
@@ -122,10 +129,10 @@ blackWhiteRatio = 5/8
 blackOffset :: Int -> Double
 blackOffset n = case n of
   0 -> 7/16
-  1 -> 2/16
+  1 -> 4/16
   2 -> 7/16
   3 -> 5/16
-  4 -> 2/16
+  4 -> 4/16
 
 blackClass :: Note -> Int
 blackClass n = case (n - 60) `mod` 12 of

@@ -142,41 +142,52 @@ instance Applicative Promise where
     x <- force xx
     return (f x)
 
-readE :: E a -> STM (Maybe a)
+
+data EventResult a =
+  Normal a |
+  NotAvailable |
+  DropThis
+    deriving Show
+
+readE :: E a -> STM (EventResult a)
 readE e = case e of
-  NeverE -> return Nothing
+  NeverE -> return NotAvailable
   MappendE e1 e2 -> do
     mx <- readE e1
     case mx of
-      Nothing -> do
-        my <- readE e2
-        case my of
-          Nothing -> return Nothing
-          Just y -> return (Just y)
-      Just x -> return (Just x)
-  FmapE f e' -> (fmap . fmap) f (readE e')
+      NotAvailable -> readE e2
+      ok -> return ok
+  FmapE f e' -> do
+    mx <- readE e'
+    case mx of
+      Normal x -> (return . Normal . f) x
+      NotAvailable -> return NotAvailable
+      DropThis -> return DropThis
   ProductE f e1 e2 -> do
     mx <- readE e1
     my <- readE e2
     case (mx,my) of
-      (Just x, Just y) -> return (Just (f x y))
-      _ -> return Nothing
+      (Normal x, Normal y) -> return (Normal (f x y))
+      (DropThis, DropThis) -> return DropThis
+      other -> return NotAvailable
   SnapshotE e' x -> do
     m_ <- readE e'
     case m_ of
-      Nothing -> return Nothing
-      Just _ -> Just <$> readX x
+      Normal _ -> Normal <$> readX x
+      NotAvailable -> return NotAvailable
+      DropThis -> return DropThis
   JustE e' -> do
     mx <- readE e'
     case mx of
-      Nothing -> return Nothing
-      Just Nothing  -> return Nothing
-      Just (Just x) -> return (Just x)
+      Normal Nothing -> return DropThis
+      Normal (Just x) -> return (Normal x)
+      NotAvailable -> return NotAvailable
+      DropThis -> return DropThis
   PortE _ ch -> do
     emp <- isEmptyTChan ch
     if emp
-      then return Nothing
-      else Just <$> readTChan ch
+      then return NotAvailable
+      else Normal <$> readTChan ch
 
 readX :: X a -> STM a
 readX x = case x of
@@ -199,10 +210,15 @@ waitE e0 = do
   readEIO e
 
 readEIO :: E a -> IO a
-readEIO e = atomically $ do
-  mx <- readE e
-  case mx of
-    Nothing -> retry
+readEIO e = do
+  what <- atomically $ do
+    mx <- readE e
+    case mx of
+      NotAvailable -> retry
+      DropThis -> return Nothing
+      Normal x -> return (Just x)
+  case what of
+    Nothing -> readEIO e
     Just x -> return x
 
 ---
@@ -244,8 +260,9 @@ accumulate e0 s0 trans = case getThreadsE e0 of
           atomically $ do
             mx <- readE e
             case mx of
-              Nothing -> retry
-              Just x -> do
+              NotAvailable -> retry
+              DropThis -> return ()
+              Normal x -> do
                 s <- readTVar state
                 let s' = trans x s
                 writeTVar state s'
