@@ -39,9 +39,9 @@ main = do
     input (inputWorker eventInH setMouse click release resize wheel quit keydown keyup)
     let (picture, sound, debug) =
            program mouse onClick onRelease window onWheel onBoot time onKeydown onKeyup
-    output sound (const play)
-    output picture (const paint)
-    output debug (const print)
+    output (const play) sound
+    output (const paint) picture
+    output (const print) debug
     return onQuit
   putStrLn "CORE terminating"
 
@@ -69,9 +69,11 @@ program mouse click release window wheel boot time keydown keyup = (picture, sou
   chart = pianoChart <$> piano
   hover = at' <$> chart <*> mouse
   hoverNote = fmap pkNote <$> hover
-  hoverNoteChanges = justE $ edge hoverNote diff
-  buttonDown = accumulate (click -|- release) False
+  hoverNoteChanges = justE $ edge diff hoverNote
+  buttonDown = accum
+    False
     (const . either (const True) (const False))
+    (click -|- release)
   combo = snapshot hoverNoteChanges buttonDown
   dragNote = fst <$> filterE snd combo
   sound = (Right <$> mousePlay <> keyPlay) <> (Left <$> keyStop)
@@ -79,19 +81,19 @@ program mouse click release window wheel boot time keydown keyup = (picture, sou
   keyStop = fromKeyboard <$> keyup
   mousePlay = clickOnKey <> dragNote
   clickOnKey = pkNote <$> justE (snapshot_ click hover)
-  pianoChanged = () <$ edge piano diff
-  windowChanged = () <$ edge window diff
-  keyboardNotes = accumulate (keyStop -|- keyPlay) [] $ \e ns -> case e of
+  pianoChanged = voidE (edge diff piano)
+  windowChanged = voidE (edge diff window)
+  keyboardNotes = accum [] (\e ns -> case e of
     Left n -> delete n ns
-    Right n -> n:ns
+    Right n -> n:ns ) (keyStop -|- keyPlay) 
   mouseAction =
     (ClickOnKey <$> clickOnKey) <>
     (DragOnKey <$> dragNote) <>
     (MouseRelease <$ release)
-  mouseNotes = accumulate mouseAction [] $ \e _ -> case e of
+  mouseNotes = accum [] (\e _ -> case e of
     ClickOnKey note -> [note]
     DragOnKey note -> [note]
-    MouseRelease -> []
+    MouseRelease -> [] ) mouseAction
   allNotes = (++) <$> keyboardNotes <*> mouseNotes
   repaint1 = snapshot_ (boot <> pianoChanged) (pianoView <$> piano)
   repaint2 = snapshot_ (boot <> windowChanged)

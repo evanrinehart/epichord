@@ -14,7 +14,7 @@ module Control.Broccoli (
   voidE,
   snapshot,
   snapshot_,
-  accumulate,
+  accum,
   edge,
   trap,
   justE,
@@ -296,8 +296,8 @@ voidE :: E a -> E ()
 voidE e = () <$ e
 
 -- | Sum over events using an initial state and a state transition function.
-accumulate :: E a -> s -> (a -> s -> s) -> X s
-accumulate e0 s0 trans = case getContextE e0 of
+accum :: s -> (a -> s -> s) -> E a -> X s
+accum s0 trans e0 = case getContextE e0 of
   Nothing -> pure s0
   Just cx -> PortX cx tv where
     tv = unsafePerformIO $ do
@@ -320,13 +320,13 @@ accumulate e0 s0 trans = case getContextE e0 of
 
 -- | A signal that remembers the most recent occurrence of an event.
 trap :: a -> E a -> X a
-trap x0 e = accumulate e x0 (\x _ -> x)
+trap x0 = accum x0 (\x _ -> x)
 
 -- | An event that occurs when an edge is detected in a signal. When a signal
 -- changes discretely the edge test is evaluated on the values immediately
 -- before and after a change. 
-edge :: X a -> (a -> a -> Maybe b) -> E b
-edge x diff = case getContextX x of
+edge :: (a -> a -> Maybe b) -> X a -> E b
+edge diff x = case getContextX x of
   Nothing -> never
   Just cx -> PortE cx ch where
     ch = unsafePerformIO $ do
@@ -362,18 +362,6 @@ chron epoch = do
   let time = diffUTCTime now epoch
   return (realToFrac time)
 
--- | Creates a new input event and a command to trigger it.
-newE :: Setup (E a, a -> IO ())
-newE = do
-  cx <- getContext
-  let epoch = cxEpoch cx
-  bch <- setupIO newBroadcastTChanIO
-  return
-    ( PortE cx bch
-    , \x -> do
-        now <- chron epoch
-        atomically (writeTChan bch (x,now)))
-
 newInternalBoot :: Context -> IO (E (), IO ())
 newInternalBoot cx = do
   bch <- newBroadcastTChanIO
@@ -394,12 +382,26 @@ newX v = do
         now <- chron epoch
         atomically (writeTVar tv (x,now)))
 
+-- | Creates a new input event and a command to trigger it.  Use 'input' to
+-- to provide external stimulus during the simulation.
+newE :: Setup (E a, a -> IO ())
+newE = do
+  cx <- getContext
+  let epoch = cxEpoch cx
+  bch <- setupIO newBroadcastTChanIO
+  return
+    ( PortE cx bch
+    , \x -> do
+        now <- chron epoch
+        atomically (writeTChan bch (x,now)))
+
+
 
 -- | Setup a thread to react to events. The callback will be provided with
 -- the time of the event which is measured in seconds since the start of
 -- the simulation.
-output :: E a -> (Time -> a -> IO ()) -> Setup ()
-output e0 act = do
+output :: (Time -> a -> IO ()) -> E a -> Setup ()
+output act e0 = do
   cx <- getContext
   setupIO $ do
     e <- dupE e0
@@ -449,7 +451,7 @@ debugE toString e = unsafePerformIO $ do
 debugX :: Eq a => ((a, a) -> String) -> X a -> X a
 debugX toString sig =
   let diff a b = if a == b then Nothing else Just (a,b) in
-  let e = edge sig diff in
+  let e = edge diff sig in
   unsafePerformIO $ do
     _ <- forkIO $ do
       e' <- dupE e

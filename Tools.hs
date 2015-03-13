@@ -9,7 +9,7 @@ import Keys
 
 boundedScroll :: E Double -> X Double -> Double -> X Double
 boundedScroll go scale start =
-  accumulate (snapshot go scale) start boundedScrollTrans
+  accum start boundedScrollTrans (snapshot go scale)
 
 boundedScrollTrans :: (Double, Double) -> Double -> Double
 boundedScrollTrans (delta, scale) s =
