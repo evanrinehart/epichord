@@ -5,17 +5,13 @@ import Control.Applicative
 import Control.Monad
 import Data.Monoid
 import Control.Concurrent
-import System.IO
-import System.Exit
 import Data.Time
-import Data.Maybe
 import Data.List
 
 import Control.Broccoli
 
 import R2
 import Paint
-import Input
 import Util
 import Config
 import Input
@@ -32,7 +28,7 @@ main = do
   (paintOutH, eventInH, window0) <- parseCommandLineOptions
   putStrLn "CORE Hello World"
   paint <- newPaintWorker paintOutH
-  (soundA, soundB, soundC) <- newSoundController
+  (soundA, _, _) <- newSoundController
   play <- newPlayer soundA
   runProgram $ do
     (onBoot, boot)    <- newE 
@@ -68,7 +64,7 @@ program :: X R2
         -> E Key
         -> E Key
         -> (E [Paint], E (Either Note Note))
-program mouse click release window wheel boot time keydown keyup = (picture, sound) where
+program mouse click release window wheel boot _ keydown keyup = (picture, sound) where
   (frame1, frame2) = splitFrameD window (pure 40)
   (frame3, frame4) = splitFrameL frame1 (pure 60)
   scroll = boundedScroll wheel (pure 0.05) 0.5
@@ -95,7 +91,7 @@ program mouse click release window wheel boot time keydown keyup = (picture, sou
     (ClickOnKey <$> clickOnKey) <>
     (DragOnKey <$> dragNote) <>
     (MouseRelease <$ release)
-  mouseNotes = accumulate mouseAction [] $ \e ns -> case e of
+  mouseNotes = accumulate mouseAction [] $ \e _ -> case e of
     ClickOnKey note -> [note]
     DragOnKey note -> [note]
     MouseRelease -> []

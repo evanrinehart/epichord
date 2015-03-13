@@ -25,13 +25,11 @@ module Control.Broccoli (
 ) where
 
 import Control.Applicative
-import Data.Functor
 import Data.Monoid
 import Control.Monad
 import Data.IORef
 import Control.Concurrent
 import Control.Concurrent.STM
-import Data.Function
 import System.IO.Unsafe
 
 -- | A value of type a that varies.
@@ -48,6 +46,7 @@ data E a where
   MappendE  :: E a -> E a -> E a
   SnapshotE :: a ~ (b,c) => E b -> X c -> E a
   JustE     :: E (Maybe a) -> E a
+  --DelayedE  :: E a -> Int -> E a
   PortE     :: MVar [ThreadId] -> TChan a -> E a
 
 instance Functor X where
@@ -139,7 +138,8 @@ instance Applicative Promise where
 data EventResult a =
   TryLater |
   DropThis |
-  Delayed a Int |
+  NotNowNotEver |
+  --Delayed a Int |
   Normal a
     deriving Show
 
@@ -157,6 +157,7 @@ readE e = case e of
       Normal x -> (return . Normal . f) x
       TryLater -> return TryLater
       DropThis -> return DropThis
+      NotNowNotEver -> return NotNowNotEver
   SnapshotE e' x -> do
     ma <- readE e'
     case ma of
@@ -165,6 +166,7 @@ readE e = case e of
         return (Normal (a,b))
       TryLater -> return TryLater
       DropThis -> return DropThis
+      NotNowNotEver -> return NotNowNotEver
   JustE e' -> do
     mx <- readE e'
     case mx of
@@ -172,6 +174,7 @@ readE e = case e of
       Normal (Just x) -> return (Normal x)
       TryLater -> return TryLater
       DropThis -> return DropThis
+      NotNowNotEver -> return NotNowNotEver
   PortE _ ch -> do
     emp <- isEmptyTChan ch
     if emp
@@ -179,7 +182,7 @@ readE e = case e of
       else Normal <$> readTChan ch
 
 readX :: X a -> STM a
-readX x = case x of
+readX sig = case sig of
   PureX v -> return v
   FmapX f xx -> f <$> readX xx
   ApplX ff xx -> do
@@ -188,11 +191,6 @@ readX x = case x of
     return (f x)
   PortX _ tv -> readTVar tv
 
-hang :: IO a
-hang = do
-  threadDelay (100 * 10^(6::Int))
-  hang
-
 waitE :: E a -> IO a
 waitE e0 = do
   e <- dupE e0
@@ -200,16 +198,21 @@ waitE e0 = do
 
 readEIO :: E a -> IO a
 readEIO e = do
-  what <- atomically $ do
+  result <- atomically $ do
     mx <- readE e
     case mx of
       TryLater -> retry
-      DropThis -> return Nothing
-      Normal x -> return (Just x)
-  case what of
-    Nothing -> readEIO e
-    Just x -> return x
+      other -> return other
+  case result of
+    TryLater -> error "impossible"
+    Normal a -> return a
+    DropThis -> readEIO e
+    NotNowNotEver -> hang
 
+hang :: IO a
+hang = do
+  threadDelay (100 * 10^(6::Int))
+  hang
 ---
 
 -- | An event which gets the value of a signal when another event occurs.
@@ -255,6 +258,7 @@ accumulate e0 s0 trans = case getThreadsE e0 of
                 s <- readTVar state
                 let s' = trans x s
                 writeTVar state s'
+              NotNowNotEver -> error "impossible (2)"
       modifyMVar_ mv (return . (threadId:))
       return state
 
@@ -330,14 +334,14 @@ runProgram (Setup setup) = do
   --threadDelay 5000
   boot
   waitE exit
-  withMVar mv (mapM killThread)
+  _ <- withMVar mv (mapM killThread)
   return ()
 
 -- | Print out events as they occur. Only for debugging purposes.
 debugE :: Show a => E a -> E a
 debugE e = unsafePerformIO $ do
   e' <- dupE e
-  (forkIO . forever) (readEIO e' >>= print)
+  _ <- (forkIO . forever) (readEIO e' >>= print)
   return e
 
 -- | Print out transitions in a signal. Only for debugging purposes.
@@ -346,7 +350,7 @@ debugX x =
   let diff a b = if a == b then Nothing else Just (a,b) in
   let e = edge x diff in
   unsafePerformIO $ do
-    forkIO $ do
+    _ <- forkIO $ do
       e' <- dupE e
       forever (readEIO e' >>= print)
     return x

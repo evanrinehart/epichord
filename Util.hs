@@ -1,7 +1,6 @@
 module Util where
 
 import R2
-import Rect
 
 floor2 :: R2 -> Z2
 floor2 (x,y) = (floor x, floor y)

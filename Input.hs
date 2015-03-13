@@ -1,4 +1,7 @@
-module Input where
+module Input (
+  inputWorker,
+  MouseButton(..)
+) where
 
 import Debug.Trace (trace)
 import Text.Parsec
