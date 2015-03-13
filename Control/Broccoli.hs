@@ -85,6 +85,7 @@ instance Applicative Setup where
 instance Functor Setup where
   fmap f (Setup io) = Setup (\mv -> f <$> io mv)
 
+-- | Time is measured from the beginning of a simulation in seconds.
 type Time = Double
 
 data Context = Context
@@ -218,9 +219,10 @@ readX time sig = case sig of
 waitE :: E a -> IO a
 waitE e0 = do
   e <- dupE e0
-  readEIO e
+  (x, _) <- readEIO e
+  return x
 
-readEIO :: E a -> IO a
+readEIO :: E a -> IO (a, Time)
 readEIO e = do
   result <- atomically $ do
     mx <- readE e
@@ -229,7 +231,7 @@ readEIO e = do
       other -> return other
   case result of
     TryLater -> error "impossible"
-    Normal a _ -> return a
+    Normal a t -> return (a, t)
     DropThis -> readEIO e
     NotNowNotEver -> hang
 
@@ -310,14 +312,13 @@ edge x diff = case getContextX x of
               Nothing -> return ()
           else forever $ do
             v <- readIORef ref
-            (d, v') <- atomically $ do
-              (v',_) <- readX undefined x
+            (d, v', t) <- atomically $ do
+              (v', t) <- readX undefined x
               case diff v v' of
-                Just d  -> return (d, v')
+                Just d  -> return (d, v', t)
                 Nothing -> retry
             writeIORef ref v'
-            now <- chron (cxEpoch cx)
-            atomically (writeTChan out (d,now))
+            atomically (writeTChan out (d, t))
       modifyMVar_ (cxThreads cx) (return . (threadId:))
       return out
 
@@ -352,7 +353,7 @@ newX v = do
         now <- chron epoch
         atomically (writeTVar tv (x,now)))
 
--- | Create a signal carrying the current time.
+-- | Create a signal carrying the current simulation time measured in seconds.
 newTime :: Setup (X Time)
 newTime = do
   cx <- getContext
@@ -360,12 +361,14 @@ newTime = do
 
 
 -- | Spawn a thread to execute an action for each event occurrence.
-output :: E a -> (a -> IO ()) -> Setup ()
+output :: E a -> (Time -> a -> IO ()) -> Setup ()
 output e0 act = do
   cx <- getContext
   setupIO $ do
     e <- dupE e0
-    tid <- (forkIO . forever) (readEIO e >>= act)
+    tid <- forkIO . forever $ do
+      (x, t) <- readEIO e
+      act t x
     modifyMVar_ (cxThreads cx) (return . (tid:))
     return ()
 
@@ -395,22 +398,26 @@ runProgram (Setup setup) = do
   return ()
 
 -- | Print out events as they occur. Only for debugging purposes.
-debugE :: Show a => E a -> E a
-debugE e = unsafePerformIO $ do
+debugE :: (a -> String) -> E a -> E a
+debugE toString e = unsafePerformIO $ do
   e' <- dupE e
-  _ <- (forkIO . forever) (readEIO e' >>= print)
+  _ <- forkIO . forever $ do
+    (x, _) <- readEIO e'
+    putStrLn (toString x)
   return e
 
 -- | Print out transitions in a signal. Only for debugging purposes.
-debugX :: (Eq a, Show a) => X a -> X a
-debugX x =
+debugX :: Eq a => ((a, a) -> String) -> X a -> X a
+debugX toString sig =
   let diff a b = if a == b then Nothing else Just (a,b) in
-  let e = edge x diff in
+  let e = edge sig diff in
   unsafePerformIO $ do
     _ <- forkIO $ do
       e' <- dupE e
-      forever (readEIO e' >>= print)
-    return x
+      forever $ do
+        (x, _) <- readEIO e'
+        putStrLn (toString x)
+    return sig
 
 -- | Same as <> but on events that might have a different type.
 (-|-) :: E a -> E b -> E (Either a b)

@@ -41,9 +41,9 @@ main = do
     input (inputWorker eventInH setMouse click release resize wheel quit keydown keyup)
     let (picture, sound, debug) =
            program mouse onClick onRelease window onWheel onBoot time onKeydown onKeyup
-    output sound play
-    output picture paint
-    output debug putStrLn
+    output sound (const play)
+    output picture (const paint)
+    output debug (const print)
     return (boot (), onQuit)
   putStrLn "CORE terminating"
 
