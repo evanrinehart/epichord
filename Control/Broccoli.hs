@@ -21,7 +21,7 @@ module Control.Broccoli (
   output,
   debugX,
   debugE,
-  (<||>)
+  (-|-)
 ) where
 
 import Control.Applicative
@@ -46,8 +46,7 @@ data E a where
   NeverE    :: E a
   FmapE     :: forall a b . (b -> a) -> E b -> E a
   MappendE  :: E a -> E a -> E a
-  ProductE  :: (b -> c -> a) -> E b -> E c -> E a
-  SnapshotE :: E b -> X a -> E a
+  SnapshotE :: a ~ (b,c) => E b -> X c -> E a
   JustE     :: E (Maybe a) -> E a
   PortE     :: MVar [ThreadId] -> TChan a -> E a
 
@@ -94,7 +93,6 @@ getThreadsE e = case e of
   NeverE -> Nothing
   FmapE _ e' -> getThreadsE e'
   MappendE e1 e2 -> getFirst $ First (getThreadsE e1) <> First (getThreadsE e2)
-  ProductE _ e1 e2 -> getFirst $ First (getThreadsE e1) <> First (getThreadsE e2)
   SnapshotE e' x -> getFirst $ First (getThreadsE e') <> First (getThreadsX x)
   JustE e' -> getThreadsE e'
   PortE mv _ -> Just mv
@@ -116,10 +114,6 @@ dupE e = case e of
     e1' <- dupE e1
     e2' <- dupE e2
     return (MappendE e1' e2')
-  ProductE f e1 e2 -> do
-    e1' <- dupE e1
-    e2' <- dupE e2
-    return (ProductE f e1' e2')
   SnapshotE e' x -> do
     e'' <- dupE e'
     return (SnapshotE e'' x)
@@ -142,51 +136,46 @@ instance Applicative Promise where
     x <- force xx
     return (f x)
 
-
 data EventResult a =
-  Normal a |
-  NotAvailable |
-  DropThis
+  TryLater |
+  DropThis |
+  Delayed a Int |
+  Normal a
     deriving Show
 
 readE :: E a -> STM (EventResult a)
 readE e = case e of
-  NeverE -> return NotAvailable
+  NeverE -> return TryLater
   MappendE e1 e2 -> do
     mx <- readE e1
     case mx of
-      NotAvailable -> readE e2
+      TryLater -> readE e2
       ok -> return ok
   FmapE f e' -> do
     mx <- readE e'
     case mx of
       Normal x -> (return . Normal . f) x
-      NotAvailable -> return NotAvailable
+      TryLater -> return TryLater
       DropThis -> return DropThis
-  ProductE f e1 e2 -> do
-    mx <- readE e1
-    my <- readE e2
-    case (mx,my) of
-      (Normal x, Normal y) -> return (Normal (f x y))
-      (DropThis, DropThis) -> return DropThis
-      other -> return NotAvailable
   SnapshotE e' x -> do
-    m_ <- readE e'
-    case m_ of
-      Normal _ -> Normal <$> readX x
-      NotAvailable -> return NotAvailable
+    ma <- readE e'
+    case ma of
+      Normal a -> do
+        b <- readX x
+        return (Normal (a,b))
+      TryLater -> return TryLater
       DropThis -> return DropThis
   JustE e' -> do
     mx <- readE e'
     case mx of
       Normal Nothing -> return DropThis
       Normal (Just x) -> return (Normal x)
-      NotAvailable -> return NotAvailable
+      TryLater -> return TryLater
       DropThis -> return DropThis
   PortE _ ch -> do
     emp <- isEmptyTChan ch
     if emp
-      then return NotAvailable
+      then return TryLater
       else Normal <$> readTChan ch
 
 readX :: X a -> STM a
@@ -214,7 +203,7 @@ readEIO e = do
   what <- atomically $ do
     mx <- readE e
     case mx of
-      NotAvailable -> retry
+      TryLater -> retry
       DropThis -> return Nothing
       Normal x -> return (Just x)
   case what of
@@ -225,11 +214,11 @@ readEIO e = do
 
 -- | An event which gets the value of a signal when another event occurs.
 snapshot :: E a -> X b -> E (a,b)
-snapshot e x = ProductE (,) e (SnapshotE e x)
+snapshot e x = SnapshotE e x
 
 -- | Like snapshot but ignores the original event's payload.
 snapshot_ :: E a -> X b -> E b
-snapshot_ e x = SnapshotE e x
+snapshot_ e x = snd <$> snapshot e x
 
 -- | Filter out events with the value of Nothing.
 justE :: E (Maybe a) -> E a
@@ -260,7 +249,7 @@ accumulate e0 s0 trans = case getThreadsE e0 of
           atomically $ do
             mx <- readE e
             case mx of
-              NotAvailable -> retry
+              TryLater -> retry
               DropThis -> return ()
               Normal x -> do
                 s <- readTVar state
@@ -363,6 +352,5 @@ debugX x =
     return x
 
 -- | Same as <> but on events that might have a different type.
-(<||>) :: E a -> E b -> E (Either a b)
-e1 <||> e2 = (Left <$> e1) <> (Right <$> e2)
-
+(-|-) :: E a -> E b -> E (Either a b)
+e1 -|- e2 = (Left <$> e1) <> (Right <$> e2)

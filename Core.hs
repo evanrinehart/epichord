@@ -52,6 +52,11 @@ main = do
     output sound play
     output picture paint
     return (boot (), onQuit)
+  putStrLn "CORE terminating"
+
+butt :: MouseButton -> Maybe ()
+butt (MouseButton 0) = Just ()
+butt _ = Nothing
 
 program :: X R2
         -> E MouseButton
@@ -70,12 +75,9 @@ program mouse click release window wheel boot time keydown keyup = (picture, sou
   piano = pianoKeys <$> frame3 <*> scroll <*> allNotes :: X PianoKeys
   chart = pianoChart <$> piano :: X (Chart R2 PianoKey)
   hover = at' <$> chart <*> mouse :: X (Maybe PianoKey)
-  --dragNote happens when the hovered note changes
-  --and when the hovered note exists
-  --and when the mouse button is down
   hoverNote = fmap pkNote <$> hover
   hoverNoteChanges = justE $ edge hoverNote diff
-  buttonDown = accumulate (click <||> release) False
+  buttonDown = accumulate (click -|- release) False
     (const . either (const True) (const False))
   combo = snapshot hoverNoteChanges buttonDown
   dragNote = fst <$> filterE snd combo
@@ -86,7 +88,7 @@ program mouse click release window wheel boot time keydown keyup = (picture, sou
   clickOnKey = pkNote <$> justE (snapshot_ click hover)
   pianoChanged = () <$ edge piano diff
   windowChanged = () <$ edge window diff
-  keyboardNotes = accumulate (keyStop <||> keyPlay) [] $ \e ns -> case e of
+  keyboardNotes = accumulate (keyStop -|- keyPlay) [] $ \e ns -> case e of
     Left n -> delete n ns
     Right n -> n:ns
   mouseAction =
