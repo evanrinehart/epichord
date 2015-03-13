@@ -40,8 +40,8 @@ data X a where
   PureX :: a -> X a
   FmapX :: forall a b . (b -> a) -> X b -> X a
   ApplX :: forall a b . X (b -> a) -> X b -> X a
-  TimeX :: a ~ Time => MVar [ThreadId] -> X a
-  PortX :: MVar [ThreadId] -> TVar a -> X a
+  TimeX :: a ~ Time => Context -> X a
+  PortX :: Context -> TVar (a,Time) -> X a
 
 -- | An event that carries values of type a when it occurs.
 data E a where
@@ -51,9 +51,7 @@ data E a where
   SnapshotE :: a ~ (b,c) => E b -> X c -> E a
   JustE     :: E (Maybe a) -> E a
   --DelayedE  :: E a -> Int -> E a
-  PortE     :: MVar [ThreadId] -> TChan (a, Time) -> E a
-
-type Time = Double
+  PortE     :: Context -> TChan (a, Time) -> E a
 
 instance Functor X where
   fmap f x = FmapX f x
@@ -70,7 +68,7 @@ instance Monoid (E a) where
   mappend e1 e2 = MappendE e1 e2
 
 -- | A monad for hooking up inputs and outputs to a program.
-data Setup a = Setup (MVar [ThreadId] -> IO a)
+data Setup a = Setup (Context -> IO a)
 
 instance Monad Setup where
   return x = Setup (\_ -> return x)
@@ -87,28 +85,42 @@ instance Applicative Setup where
 instance Functor Setup where
   fmap f (Setup io) = Setup (\mv -> f <$> io mv)
 
+type Time = Double
+
+data Context = Context
+  { cxThreads :: MVar [ThreadId]
+  , cxEpoch   :: UTCTime }
+
 setupIO :: IO a -> Setup a
 setupIO io = Setup (\_ -> io)
 
-getThreads :: Setup (MVar [ThreadId])
-getThreads = Setup (\mv -> return mv)
+getContext :: Setup Context
+getContext = Setup (\cx -> return cx)
 
-getThreadsE :: E a -> Maybe (MVar [ThreadId])
-getThreadsE e = case e of
-  NeverE -> Nothing
-  FmapE _ e' -> getThreadsE e'
-  MappendE e1 e2 -> getFirst $ First (getThreadsE e1) <> First (getThreadsE e2)
-  SnapshotE e' x -> getFirst $ First (getThreadsE e') <> First (getThreadsX x)
-  JustE e' -> getThreadsE e'
-  PortE mv _ -> Just mv
+containsTimeX :: X a -> Bool
+containsTimeX x = case x of
+  PureX _ -> False
+  FmapX _ x' -> containsTimeX x'
+  ApplX x1 x2 -> containsTimeX x1 || containsTimeX x2
+  TimeX _ -> True
+  PortX _ _ -> False
 
-getThreadsX :: X a -> Maybe (MVar [ThreadId])
-getThreadsX x = case x of
+getContextX :: X a -> Maybe Context
+getContextX x = case x of
   PureX _ -> Nothing
-  FmapX _ x' -> getThreadsX x'
-  ApplX x1 x2 -> getFirst $ First (getThreadsX x1) <> First (getThreadsX x2)
-  TimeX mv -> Just mv
-  PortX mv _ -> Just mv
+  FmapX _ x' -> getContextX x'
+  ApplX x1 x2 -> getFirst $ First (getContextX x1) <> First (getContextX x2)
+  TimeX cx -> Just cx
+  PortX cx _ -> Just cx
+
+getContextE :: E a -> Maybe Context
+getContextE e = case e of
+  NeverE -> Nothing
+  FmapE _ e' -> getContextE e'
+  MappendE e1 e2 -> getFirst $ First (getContextE e1) <> First (getContextE e2)
+  SnapshotE e' x -> getFirst $ First (getContextE e') <> First (getContextX x)
+  JustE e' -> getContextE e'
+  PortE cx _ -> Just cx
 
 dupE :: E a -> IO (E a)
 dupE e = case e of
@@ -169,7 +181,7 @@ readE e = case e of
     ma <- readE e'
     case ma of
       Normal a t -> do
-        b <- readX t x
+        (b, _) <- readX t x
         return (Normal (a,b) t)
       TryLater -> return TryLater
       DropThis -> return DropThis
@@ -190,15 +202,17 @@ readE e = case e of
         (v, t) <- readTChan ch
         return (Normal v t)
 
-readX :: Double -> X a -> STM a
+readX :: Double -> X a -> STM (a, Time)
 readX time sig = case sig of
-  PureX v -> return v
-  FmapX f xx -> f <$> readX time xx
+  PureX v -> return (v, 0)
+  FmapX f xx -> do
+    (x, t) <- readX time xx
+    return (f x, t)
   ApplX ff xx -> do
-    f <- readX time ff
-    x <- readX time xx
-    return (f x)
-  TimeX _ -> return time
+    (f,t1) <- readX time ff
+    (x,t2) <- readX time xx
+    return (f x, max t1 t2)
+  TimeX _ -> return (time, time)
   PortX _ tv -> readTVar tv
 
 waitE :: E a -> IO a
@@ -251,11 +265,11 @@ never = mempty
 
 -- | Sum over events using an initial state and a state transition function.
 accumulate :: E a -> s -> (a -> s -> s) -> X s
-accumulate e0 s0 trans = case getThreadsE e0 of
+accumulate e0 s0 trans = case getContextE e0 of
   Nothing -> pure s0
-  Just mv -> PortX mv tv where
+  Just cx -> PortX cx tv where
     tv = unsafePerformIO $ do
-      state <- newTVarIO s0
+      state <- newTVarIO (s0, 0)
       threadId <- forkIO $ do
         e <- dupE e0
         forever $ do
@@ -264,44 +278,51 @@ accumulate e0 s0 trans = case getThreadsE e0 of
             case mx of
               TryLater -> retry
               DropThis -> return ()
-              Normal x _ -> do
-                s <- readTVar state
+              Normal x t -> do
+                (s,_) <- readTVar state
                 let s' = trans x s
-                writeTVar state s'
+                writeTVar state (s',t)
               NotNowNotEver -> error "impossible (2)"
-      modifyMVar_ mv (return . (threadId:))
+      modifyMVar_ (cxThreads cx) (return . (threadId:))
       return state
 
--- | An event that occurs when an edge is detected in a signal. The edge test
--- is applied to values before and after a discrete transition in the signal.
--- The test should return Nothing when the two values are the same.
+-- | An event that occurs when an edge is detected in a signal. When a signal
+-- changes discretely the edge test is evaluated on the values immediately
+-- before and after a change. 
 edge :: X a -> (a -> a -> Maybe b) -> E b
-edge x diff = case getThreadsX x of
+edge x diff = case getContextX x of
   Nothing -> never
-  Just mv -> PortE mv ch where
+  Just cx -> PortE cx ch where
     ch = unsafePerformIO $ do
       out <- newBroadcastTChanIO
       threadId <- forkIO $ do
-        t0 <- chron
-        v0 <- atomically (readX t0 x)
+        (v0,_) <- atomically (readX 0 x)
         ref <- newIORef v0
-        forever $ do
-          v <- readIORef ref
-          now <- chron
-          (d, v') <- atomically $ do
-            v' <- readX now x
+        if containsTimeX x
+          then forever $ do
+            now <- chron (cxEpoch cx)
+            v <- readIORef ref
+            (v', _) <- atomically (readX now x)
             case diff v v' of
-              Just d  -> return (d, v')
-              Nothing -> retry
-          writeIORef ref v'
-          atomically (writeTChan out (d,now))
-      modifyMVar_ mv (return . (threadId:))
+              Just d  -> do
+                writeIORef ref v'
+                atomically (writeTChan out (d,now))
+              Nothing -> return ()
+          else forever $ do
+            v <- readIORef ref
+            (d, v') <- atomically $ do
+              (v',_) <- readX undefined x
+              case diff v v' of
+                Just d  -> return (d, v')
+                Nothing -> retry
+            writeIORef ref v'
+            now <- chron (cxEpoch cx)
+            atomically (writeTChan out (d,now))
+      modifyMVar_ (cxThreads cx) (return . (threadId:))
       return out
 
-chron :: IO Double
-chron = do
-  let date = fromGregorian 2015 1 1
-  let epoch = localTimeToUTC utc (LocalTime date midnight)
+chron :: UTCTime -> IO Double
+chron epoch = do
   now <- getCurrentTime
   let time = diffUTCTime now epoch
   return (realToFrac time)
@@ -309,45 +330,52 @@ chron = do
 -- | Creates a new event and an IO action to trigger it.
 newE :: Setup (E a, a -> IO ())
 newE = do
-  mv <- getThreads
+  cx <- getContext
+  let epoch = cxEpoch cx
   bch <- setupIO newBroadcastTChanIO
-  return (PortE mv bch, \x -> do
-    now <- chron
-    (atomically . writeTChan bch) (x,now)
-    )
+  return
+    ( PortE cx bch
+    , \x -> do
+        now <- chron epoch
+        atomically (writeTChan bch (x,now)))
 
 -- | Creates a new signal and an IO action to update it. The argument is
 -- the initial value of the signal.
 newX :: a -> Setup (X a, a -> IO ())
 newX v = do
-  mv <- getThreads
-  tv <- setupIO (newTVarIO v)
-  return (PortX mv tv, atomically . writeTVar tv)
+  cx <- getContext
+  let epoch = cxEpoch cx
+  tv <- setupIO (newTVarIO (v,0))
+  return
+    ( PortX cx tv
+    , \x -> do
+        now <- chron epoch
+        atomically (writeTVar tv (x,now)))
 
 -- | Create a signal carrying the current time.
 newTime :: Setup (X Time)
 newTime = do
-  mv <- getThreads
-  return (TimeX mv)
+  cx <- getContext
+  return (TimeX cx)
 
 
 -- | Spawn a thread to execute an action for each event occurrence.
 output :: E a -> (a -> IO ()) -> Setup ()
 output e0 act = do
-  mv <- getThreads
+  cx <- getContext
   setupIO $ do
     e <- dupE e0
     tid <- (forkIO . forever) (readEIO e >>= act)
-    modifyMVar_ mv (return . (tid:))
+    modifyMVar_ (cxThreads cx) (return . (tid:))
     return ()
 
 -- | Spawn an input thread to generate source signals and events.
 input :: IO () -> Setup ()
 input handler = do
-  mv <- getThreads
+  cx <- getContext
   setupIO $ do
     tid <- forkIO handler
-    modifyMVar_ mv (return . (tid:))
+    modifyMVar_ (cxThreads cx) (return . (tid:))
     return ()
 
 -- | Run the setup action to create input and output threads. The returned IO
@@ -357,7 +385,9 @@ input handler = do
 runProgram :: Setup (IO (), E ()) -> IO ()
 runProgram (Setup setup) = do
   mv <- newMVar []
-  (boot, exit) <- setup mv
+  epoch <- getCurrentTime
+  let cx = Context mv epoch
+  (boot, exit) <- setup cx
   --threadDelay 5000
   boot
   waitE exit
