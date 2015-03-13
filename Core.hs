@@ -9,6 +9,7 @@ import System.IO
 import System.Exit
 import Data.Time
 import Data.Maybe
+import Data.List
 
 import Control.Broccoli
 
@@ -22,6 +23,7 @@ import Sound
 import Chart
 import Rect
 import Piano
+import Keys
 
 import Tools
 
@@ -41,10 +43,12 @@ main = do
     (window, resize)  <- newX window0
     (onQuit, quit)    <- newE
     (time, tick)      <- newE
-    input (inputWorker eventInH setMouse click release resize wheel quit)
+    (onKeydown, keydown) <- newE
+    (onKeyup, keyup) <- newE
+    input (inputWorker eventInH setMouse click release resize wheel quit keydown keyup)
     input (forever (threadDelay 1000000 >> getCurrentTime >>= tick))
     let (picture, sound) =
-           program mouse onClick onRelease window onWheel onBoot time
+           program mouse onClick onRelease window onWheel onBoot time onKeydown onKeyup
     output sound play
     output picture paint
     return (boot (), onQuit)
@@ -56,32 +60,52 @@ program :: X R2
         -> E Double
         -> E ()
         -> E UTCTime
-        -> (E [Paint], E Note)
-program mouse click release window wheel boot time = (picture, sound) where
-  (frame1, frame2) = splitFrameD window (pure 50)
-  (frame3, frame4) = splitFrameL frame1 (pure 50)
+        -> E Key
+        -> E Key
+        -> (E [Paint], E (Either Note Note))
+program mouse click release window wheel boot time keydown keyup = (picture, sound) where
+  (frame1, frame2) = splitFrameD window (pure 40)
+  (frame3, frame4) = splitFrameL frame1 (pure 60)
   scroll = boundedScroll wheel (pure 0.05) 0.5
-  piano = pianoKeys <$> frame3 <*> scroll <*> ons :: X PianoKeys
+  piano = pianoKeys <$> frame3 <*> scroll <*> allNotes :: X PianoKeys
   chart = pianoChart <$> piano :: X (Chart R2 PianoKey)
   hover = at' <$> chart <*> mouse :: X (Maybe PianoKey)
-  holding = accumulate (click <||> release) False $ \e _ -> case e of
-    Left _ -> True
-    Right _ -> False
-  sound = dragOnKey
-  ons = accumulate (dragOnKey <||> release) [] $ \e s -> case e of
-    Left note -> [note]
-    Right _ -> []
+  --dragNote happens when the hovered note changes
+  --and when the hovered note exists
+  --and when the mouse button is down
+  hoverNote = fmap pkNote <$> hover
+  hoverNoteChanges = justE $ edge hoverNote diff
+  buttonDown = accumulate (click <||> release) False
+    (const . either (const True) (const False))
+  combo = snapshot hoverNoteChanges buttonDown
+  dragNote = fst <$> filterE snd combo
+  sound = (Right <$> mousePlay <> keyPlay) <> (Left <$> keyStop)
+  keyPlay = fromKeyboard <$> keydown
+  keyStop = fromKeyboard <$> keyup
+  mousePlay = clickOnKey <> dragNote
   clickOnKey = pkNote <$> justE (snapshot_ click hover)
-  hoverDown = (,) <$> hover <*> holding
-  hoverDownChanged = edge hoverDown diff
-  --dragOnKey = justE . fmap fuck $ hoverDownChanged
-  dragOnKey = justE (fuck <$> hoverDownChanged)
   pianoChanged = () <$ edge piano diff
-  repaint = snapshot_ (boot <> pianoChanged) (pianoView <$> piano)
-  picture = repaint
+  windowChanged = () <$ edge window diff
+  keyboardNotes = accumulate (keyStop <||> keyPlay) [] $ \e ns -> case e of
+    Left n -> delete n ns
+    Right n -> n:ns
+  mouseAction =
+    (ClickOnKey <$> clickOnKey) <>
+    (DragOnKey <$> dragNote) <>
+    (MouseRelease <$ release)
+  mouseNotes = accumulate mouseAction [] $ \e ns -> case e of
+    ClickOnKey note -> [note]
+    DragOnKey note -> [note]
+    MouseRelease -> []
+  allNotes = (++) <$> keyboardNotes <*> mouseNotes
+  repaint1 = snapshot_ (boot <> pianoChanged) (pianoView <$> piano)
+  repaint2 = snapshot_ (boot <> windowChanged)
+    ((\fr -> [Clip fr, Fill fr (20,20,20)]) <$> frame2)
+  repaint3 = snapshot_ (boot <> windowChanged)
+    ((\fr -> [Clip fr, Fill fr (15,15,15)]) <$> frame4)
+  picture = repaint1 <> repaint2 <> repaint3
 
-fuck :: (Maybe PianoKey, Bool) -> Maybe Int
-fuck (Nothing, _) = Nothing
-fuck (Just pk, False) = Nothing
-fuck (Just pk, True) = Just $ pkNote pk
-    
+data MouseAction =
+  ClickOnKey Int |
+  DragOnKey Int |
+  MouseRelease

@@ -15,6 +15,7 @@ data KeyColor = Wh | Bl deriving (Eq, Show)
 
 data PianoKeys = PianoKeys
   { bound :: Rect ()
+  , topLinePositions :: (R,R)
   , whiteKeys :: [Rect PianoKey]
   , blackKeys :: [Rect PianoKey] }
     deriving (Eq, Show)
@@ -26,31 +27,35 @@ data PianoKey = PianoKey
     deriving (Eq, Show)
 
 pianoChart :: PianoKeys -> Chart R2 PianoKey
-pianoChart (PianoKeys bound whs bls) = 
+pianoChart (PianoKeys bound tlp whs bls) = 
   let wh = mconcat (map rect whs) in
   let bl = mconcat (map rect bls) in
   clip bound (bl <> wh)
 
 pianoView :: PianoKeys -> [Paint]
-pianoView (PianoKeys bound whs bls) =
-  [clipOn, blank] ++ colors1 ++ lines ++ blacks ++ colors2 where
+pianoView (PianoKeys bound (tlp1,tlp2) whs bls) =
+  [clipOn, blank] ++ colors1 ++ topLines ++ lines ++ blacks ++ colors2 where
   clipOn = Clip bound
-  blank = Fill bound (255,255,255)
-  colors1 = map (\(Rect _ l t r b) -> Fill (Rect () l t r b) (64,64,128))
+  blank = Fill bound (220,220,220)
+  colors1 = map (\(Rect _ l t r b) -> Fill (Rect () l t r b) (128,128,128))
     (filter (\(Rect k _ _ _ _) -> pkOnOff k == On) whs)
-  lines = map (\(Rect _ l t r b) -> Fill (Rect () l t r (t+1)) (0,0,0)) whs
+  lines = map (\(Rect _ l t r b) -> Fill (Rect () l b r (b+1)) (0,0,0)) whs
+  topLines =
+    [ Fill (Rect () (left bound) tlp1 (right bound) (tlp1+1)) (0,0,0)
+    , Fill (Rect () (left bound) tlp2 (right bound) (tlp2+1)) (0,0,0) ]
   blacks = map (\r -> Fill (void r) (0,0,0)) bls
-  colors2 = map (\(Rect _ l t r b) -> Fill (Rect () l t r b) (128,128,128))
+  colors2 = map
+    (\(Rect _ l t r b) -> Fill (Rect () (l+1) (t+1) (r-1) (b-1)) (200,200,200))
     (filter (\(Rect k _ _ _ _) -> pkOnOff k == On) bls)
 
 count = length
 
 whatsOn :: PianoKeys -> [Note]
-whatsOn (PianoKeys _ whs bls) = map noteOf
+whatsOn (PianoKeys _ _ whs bls) = map noteOf
   (filter (\(Rect k _ _ _ _) -> pkOnOff k == On) whs ++
   filter (\(Rect k _ _ _ _) -> pkOnOff k == On) bls)
 
-moveKey :: Rect () -> R -> Rect a -> Rect a
+moveKey :: Frame -> R -> Rect a -> Rect a
 moveKey (Rect _ l t r b) scroll =
   let heightOfKey = (r - l) / 6 in
   let heightOfKeyboard = heightOfKey * r2f whiteCount in
@@ -60,15 +65,25 @@ moveKey (Rect _ l t r b) scroll =
   translateRect 0 (-verticalOffset) .
   scaleRect (r - l) heightOfKeyboard
 
-pianoKeys :: Rect () -> Double -> [Note] -> PianoKeys
+pianoKeys :: Frame -> Double -> [Note] -> PianoKeys
 pianoKeys area shift ons = PianoKeys
   { bound = area
+  , topLinePositions = calculateTlp area shift
   , whiteKeys = map (moveKey area shift) (white ons)
   , blackKeys = map (moveKey area shift) (black ons) }
 
 onTrue :: Bool -> OnOff
 onTrue True = On
 onTrue False = Off
+
+calculateTlp :: Frame -> R -> (R, R)
+calculateTlp (Rect () l t r b) scroll =
+  let heightOfKey = (r - l) / 6 in
+  let heightOfKeyboard = heightOfKey * r2f whiteCount in
+  let halfViewportHeight = (b - t) / 2 in
+  let verticalOffset = scroll*heightOfKeyboard - halfViewportHeight in
+  let tlp = t - verticalOffset in
+  (tlp, tlp - heightOfKey)
 
 white :: [Note] -> [Rect PianoKey]
 white ons = zipWith f whiteNotes [0..whiteCount-1] where
@@ -141,3 +156,5 @@ blackClass n = case (n - 60) `mod` 12 of
   6 -> 2
   8 -> 3
   10 -> 4
+
+

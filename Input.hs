@@ -142,15 +142,17 @@ inputWorker :: Handle
             -> (Rect () -> IO ())
             -> (Double -> IO ())
             -> (() -> IO ())
+            -> (Key -> IO ())
+            -> (Key -> IO ())
             -> IO ()
-inputWorker h mouse click release window wheel quit =
+inputWorker h mouse click release window wheel quit keydown keyup =
   handleEvents h $ \i -> case i of
     Mouse x y -> mouse (x,y)
     Resize w h -> window (Rect () 0 0 (realToFrac w) (realToFrac h))
     Click mb -> click mb
     Release mb -> release mb
---    KeyDown k -> keydown k
---    KeyUp k -> keyup k
+    KeyDown k -> keydown k
+    KeyUp k -> keyup k
     Quit -> quit ()
 --    Character c -> char c
     Wheel w -> wheel w

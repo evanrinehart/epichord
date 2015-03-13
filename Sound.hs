@@ -67,10 +67,12 @@ encodeCommand c = case c of
   Exit -> "exit"
   Crash -> "crash"
 
-newPlayer :: (PlayerCommand -> IO ()) -> IO (Int -> IO ())
-newPlayer dispatch = return $ \note -> do
+newPlayer :: (PlayerCommand -> IO ()) -> IO (Either Int Int -> IO ())
+newPlayer dispatch = return $ \eith -> do
   forkIO $ do
-    dispatch (Execute 9 0 note 127)
+    case eith of
+      Right note -> dispatch (Execute 9 0 note 127)
+      Left note -> dispatch (Execute 8 0 note 127)
     threadDelay 1000000
     --dispatch (Execute 8 0 note 127)
   return ()
