@@ -21,7 +21,7 @@ splitFrameL :: X Frame -> X Double -> (X Frame, X Frame)
 splitFrameL parent division = (frL, frR) where
   frL = f1 <$> parent <*> division
   frR = f2 <$> parent <*> division
-  f1 (Rect _ l t r b) d = Rect () l     t (l+d) b
+  f1 (Rect _ l t _ b) d = Rect () l     t (l+d) b
   f2 (Rect _ l t r b) d = Rect () (l+d) t     r b
 
 splitFrameD :: X Frame -> X Double -> (X Frame, X Frame)
@@ -29,7 +29,7 @@ splitFrameD parent division = (frU, frD) where
   frU = f1 <$> parent <*> division
   frD = f2 <$> parent <*> division
   f1 (Rect _ l t r b) d = Rect () l     t r (b-d)
-  f2 (Rect _ l t r b) d = Rect () l (b-d) r     b
+  f2 (Rect _ l _ r b) d = Rect () l (b-d) r     b
 
 fromKeyboard :: Key -> Int
 fromKeyboard k = case k of

@@ -4,9 +4,6 @@ import System.IO
 import System.Process
 import System.Exit
 import Control.Concurrent
-import Control.Concurrent.STM
-import Data.Char
-import Control.Monad
 
 data PlayerCommand =
   Load String String |
@@ -69,7 +66,7 @@ encodeCommand c = case c of
 
 newPlayer :: (PlayerCommand -> IO ()) -> IO (Either Int Int -> IO ())
 newPlayer dispatch = return $ \eith -> do
-  forkIO $ do
+  _ <- forkIO $ do
     case eith of
       Right note -> dispatch (Execute 9 0 note 127)
       Left note -> dispatch (Execute 8 0 note 127)

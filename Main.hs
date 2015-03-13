@@ -2,10 +2,7 @@
 module Main where
 
 import Control.Applicative
-import Control.Monad
 import Data.Monoid
-import Control.Concurrent
-import Data.Time
 import Data.List
 
 import Control.Broccoli
@@ -38,15 +35,15 @@ main = do
     (onWheel, wheel)  <- newE
     (window, resize)  <- newX window0
     (onQuit, quit)    <- newE
-    (time, tick)      <- newE
+    time              <- newTime
     (onKeydown, keydown) <- newE
     (onKeyup, keyup) <- newE
     input (inputWorker eventInH setMouse click release resize wheel quit keydown keyup)
-    input (forever (threadDelay 1000000 >> getCurrentTime >>= tick))
-    let (picture, sound) =
+    let (picture, sound, debug) =
            program mouse onClick onRelease window onWheel onBoot time onKeydown onKeyup
     output sound play
     output picture paint
+    output debug putStrLn
     return (boot (), onQuit)
   putStrLn "CORE terminating"
 
@@ -60,11 +57,12 @@ program :: X R2
         -> X (Rect ())
         -> E Double
         -> E ()
-        -> E UTCTime
+        -> X Time
         -> E Key
         -> E Key
-        -> (E [Paint], E (Either Note Note))
-program mouse click release window wheel boot _ keydown keyup = (picture, sound) where
+        -> (E [Paint], E (Either Note Note), E String)
+program mouse click release window wheel boot time keydown keyup = (picture, sound, debug) where
+  debug = show <$> snapshot click time
   (frame1, frame2) = splitFrameD window (pure 40)
   (frame3, frame4) = splitFrameL frame1 (pure 60)
   scroll = boundedScroll wheel (pure 0.05) 0.5
@@ -101,9 +99,11 @@ program mouse click release window wheel boot _ keydown keyup = (picture, sound)
     ((\fr -> [Clip fr, Fill fr (20,20,20)]) <$> frame2)
   repaint3 = snapshot_ (boot <> windowChanged)
     ((\fr -> [Clip fr, Fill fr (15,15,15)]) <$> frame4)
+--  repaint5 = snapshot_ vsync 
   picture = repaint1 <> repaint2 <> repaint3
 
 data MouseAction =
   ClickOnKey Int |
   DragOnKey Int |
   MouseRelease
+

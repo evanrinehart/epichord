@@ -5,15 +5,12 @@ import System.IO
 import Data.ByteString.Builder
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as BSL
-import qualified Data.ByteString.Internal as BSI
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding
 import Data.Monoid
 import Control.Monad
 import Data.List
-import Foreign.Storable
-import Data.IORef
 import Data.Bits
 import Data.Vector.Storable (Vector)
 import qualified Data.Vector.Storable as V
