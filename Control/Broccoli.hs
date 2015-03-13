@@ -5,25 +5,35 @@
 module Control.Broccoli (
   X,
   E,
-  Time,
+
+  -- * Event and signal combinators
   never,
+  unionE,
+  (<>),
+  (-|-),
+  voidE,
   snapshot,
   snapshot_,
   accumulate,
   edge,
+  trap,
   justE,
   maybeE,
   filterE,
+
+  -- * Setup IO interface
   Setup,
+  Time,
+  Boot,
   runProgram,
   newX,
   newE,
-  newTime,
   input,
   output,
+
+  -- * Debug
   debugX,
   debugE,
-  (-|-)
 ) where
 
 import Control.Applicative
@@ -35,7 +45,9 @@ import Control.Concurrent.STM
 import System.IO.Unsafe
 import Data.Time
 
--- | A value of type a that varies.
+-- | @X a@ represents time signals with values of type @a@.
+-- 
+-- > X a = Time -> a
 data X a where
   PureX :: a -> X a
   FmapX :: forall a b . (b -> a) -> X b -> X a
@@ -43,7 +55,9 @@ data X a where
   TimeX :: a ~ Time => Context -> X a
   PortX :: Context -> TVar (a,Time) -> X a
 
--- | An event that carries values of type a when it occurs.
+-- | @E a@ represents events with values of type @a@.
+-- 
+-- > E a = [(Time, a)]
 data E a where
   NeverE    :: E a
   FmapE     :: forall a b . (b -> a) -> E b -> E a
@@ -63,9 +77,10 @@ instance Applicative X where
 instance Functor E where
   fmap f e = FmapE f e
 
+-- | mempty = 'never', mappend = 'unionE'
 instance Monoid (E a) where
-  mempty = NeverE
-  mappend e1 e2 = MappendE e1 e2
+  mempty = never
+  mappend = unionE
 
 -- | A monad for hooking up inputs and outputs to a program.
 data Setup a = Setup (Context -> IO a)
@@ -87,6 +102,9 @@ instance Functor Setup where
 
 -- | Time is measured from the beginning of a simulation in seconds.
 type Time = Double
+
+-- | The boot event occurs once at the beginning of a simulation.
+type Boot = ()
 
 data Context = Context
   { cxThreads :: MVar [ThreadId]
@@ -263,7 +281,19 @@ filterE p e = maybeE (\x -> if p x then Just x else Nothing) e
 
 -- | An event that never happens.
 never :: E a
-never = mempty
+never = NeverE
+
+-- | All the occurrences from two events together. Same as '<>'.
+unionE :: E a -> E a -> E a
+unionE = MappendE
+
+-- | Same as 'unionE' but on events that might have a different type.
+(-|-) :: E a -> E b -> E (Either a b)
+e1 -|- e2 = (Left <$> e1) <> (Right <$> e2)
+
+-- | Forget the values associated with the events.
+voidE :: E a -> E ()
+voidE e = () <$ e
 
 -- | Sum over events using an initial state and a state transition function.
 accumulate :: E a -> s -> (a -> s -> s) -> X s
@@ -287,6 +317,10 @@ accumulate e0 s0 trans = case getContextE e0 of
               NotNowNotEver -> error "impossible (2)"
       modifyMVar_ (cxThreads cx) (return . (threadId:))
       return state
+
+-- | A signal that remembers the most recent occurrence of an event.
+trap :: a -> E a -> X a
+trap x0 e = accumulate e x0 (\x _ -> x)
 
 -- | An event that occurs when an edge is detected in a signal. When a signal
 -- changes discretely the edge test is evaluated on the values immediately
@@ -328,7 +362,7 @@ chron epoch = do
   let time = diffUTCTime now epoch
   return (realToFrac time)
 
--- | Creates a new event and an IO action to trigger it.
+-- | Creates a new input event and a command to trigger it.
 newE :: Setup (E a, a -> IO ())
 newE = do
   cx <- getContext
@@ -340,8 +374,15 @@ newE = do
         now <- chron epoch
         atomically (writeTChan bch (x,now)))
 
--- | Creates a new signal and an IO action to update it. The argument is
--- the initial value of the signal.
+newInternalBoot :: Context -> IO (E (), IO ())
+newInternalBoot cx = do
+  bch <- newBroadcastTChanIO
+  return
+    ( PortE cx bch
+    , atomically (writeTChan bch ((), 0)) )
+
+-- | Creates a new input signal with an initial value. Use 'input' to feed
+-- data to the signal during the simulation.
 newX :: a -> Setup (X a, a -> IO ())
 newX v = do
   cx <- getContext
@@ -353,14 +394,10 @@ newX v = do
         now <- chron epoch
         atomically (writeTVar tv (x,now)))
 
--- | Create a signal carrying the current simulation time measured in seconds.
-newTime :: Setup (X Time)
-newTime = do
-  cx <- getContext
-  return (TimeX cx)
 
-
--- | Spawn a thread to execute an action for each event occurrence.
+-- | Setup a thread to react to events. The callback will be provided with
+-- the time of the event which is measured in seconds since the start of
+-- the simulation.
 output :: E a -> (Time -> a -> IO ()) -> Setup ()
 output e0 act = do
   cx <- getContext
@@ -372,7 +409,8 @@ output e0 act = do
     modifyMVar_ (cxThreads cx) (return . (tid:))
     return ()
 
--- | Spawn an input thread to generate source signals and events.
+-- | A thread to generate source signals and events will be started
+-- when setup is complete.
 input :: IO () -> Setup ()
 input handler = do
   cx <- getContext
@@ -381,16 +419,17 @@ input handler = do
     modifyMVar_ (cxThreads cx) (return . (tid:))
     return ()
 
--- | Run the setup action to create input and output threads. The returned IO
--- action will be executed when setup is complete. runProgram blocks until
--- the returned event occurs, at which time it kills all the threads and
--- returns.
-runProgram :: Setup (IO (), E ()) -> IO ()
-runProgram (Setup setup) = do
+-- | Runs a program defined by the setup computation. The simulation ends
+-- if the returned event occurs.
+runProgram :: (E Boot -> X Time -> Setup (E ())) -> IO ()
+runProgram setup = do
   mv <- newMVar []
   epoch <- getCurrentTime
   let cx = Context mv epoch
-  (boot, exit) <- setup cx
+  let time = TimeX cx
+  (onBoot, boot) <- newInternalBoot cx
+  let Setup act = setup onBoot time
+  exit <- act cx
   --threadDelay 5000
   boot
   waitE exit
@@ -419,6 +458,3 @@ debugX toString sig =
         putStrLn (toString x)
     return sig
 
--- | Same as <> but on events that might have a different type.
-(-|-) :: E a -> E b -> E (Either a b)
-e1 -|- e2 = (Left <$> e1) <> (Right <$> e2)

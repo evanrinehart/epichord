@@ -27,15 +27,13 @@ main = do
   paint <- newPaintWorker paintOutH
   (soundA, _, _) <- newSoundController
   play <- newPlayer soundA
-  runProgram $ do
-    (onBoot, boot)    <- newE 
+  runProgram $ \onBoot time -> do
     (mouse, setMouse) <- newX (0,0)
     (onClick, click)  <- newE
     (onRelease, release)  <- newE
     (onWheel, wheel)  <- newE
     (window, resize)  <- newX window0
     (onQuit, quit)    <- newE
-    time              <- newTime
     (onKeydown, keydown) <- newE
     (onKeyup, keyup) <- newE
     input (inputWorker eventInH setMouse click release resize wheel quit keydown keyup)
@@ -44,7 +42,7 @@ main = do
     output sound (const play)
     output picture (const paint)
     output debug (const print)
-    return (boot (), onQuit)
+    return onQuit
   putStrLn "CORE terminating"
 
 butt :: MouseButton -> Maybe ()
@@ -62,13 +60,14 @@ program :: X R2
         -> E Key
         -> (E [Paint], E (Either Note Note), E String)
 program mouse click release window wheel boot time keydown keyup = (picture, sound, debug) where
-  debug = show <$> snapshot click time
-  (frame1, frame2) = splitFrameD window (pure 40)
+  --debug = show <$> snapshot click time
+  debug = never
+  (frame1, frame2) = splitFrameD window (pure 0)
   (frame3, frame4) = splitFrameL frame1 (pure 60)
   scroll = boundedScroll wheel (pure 0.05) 0.5
-  piano = pianoKeys <$> frame3 <*> scroll <*> allNotes :: X PianoKeys
-  chart = pianoChart <$> piano :: X (Chart R2 PianoKey)
-  hover = at' <$> chart <*> mouse :: X (Maybe PianoKey)
+  piano = pianoKeys <$> frame3 <*> scroll <*> allNotes
+  chart = pianoChart <$> piano
+  hover = at' <$> chart <*> mouse
   hoverNote = fmap pkNote <$> hover
   hoverNoteChanges = justE $ edge hoverNote diff
   buttonDown = accumulate (click -|- release) False
