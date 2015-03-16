@@ -108,10 +108,10 @@ program mouse click release window wheel boot time keydown keyup = (picture, sou
     ((\fr -> [Clip fr, Fill fr (15,15,15)]) <$> frame4)
   repaint4 = snapshot_ (boot <> windowChanged) mainFrame
   timeStep = never
-  --pulse = unionE boot (delayE 0.25 pulse)
-  sine = (\t -> if t < 0 then 0 else sin t) <$> time
-  --debug = show <$> edge parity (delayX 10 sine)
-  debug = never
+  --pulse = unionE boot (delayE 0.1 pulse)
+  --counter = accum 0 (+) (1 <$ pulse)
+  --debug = show <$> snapshot_ pulse signal
+  debug = show <$> edge diff time
   barn = theBarn time (voidE click)
   --barn = pure []
   xys = fff <$> barn <*> time
