@@ -1,4 +1,4 @@
-ghc -Wall -o core -threaded Main.hs
+ghc -O2 -Wall -o core Main.hs
 gcc -o sound -framework Foundation -framework CoreMidi sound.c
 gcc -o Epichord -framework Foundation -framework AppKit video.m
 

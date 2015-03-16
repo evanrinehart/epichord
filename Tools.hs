@@ -56,3 +56,36 @@ fromKeyboard k = case k of
   H -> 56
   B -> 54
   _ -> 60
+
+
+counter :: Int -> E () -> X Int
+counter start bump = out where
+  out = trap 0 bumpToNumber
+  bumpToNumber = snapshot_ bump nextNumber
+  nextNumber = fmap (+1) out
+
+
+{-
+data Barn i s = NewAnimal i s | RetireAnimal i
+
+barn :: E (Barn i s) -> X [s]
+barn ii = out where
+  out = trap [] out'
+  out' = fmap f (snapshot ii out)
+  f (i, s) = case i of
+    NewAnimal i x -> (i,x) : s
+    RetireAnimal i -> deleteBy ((==i) . fst) s
+
+timeBarn :: (Time -> s -> a) -> X Time -> E (Barn i s) -> X [a]
+timeBarn f time ii = fmap (\x -> f <$> time <*> x) (barn ii)
+    
+
+intBarn :: E IntBarn -> X [Int]
+intBarn i = out where
+  s = trap (0, []) s'
+  s' = fmap f (snapshot i out)
+  f (i, (n', s)) = case i of
+    NewInt -> (n'+1, n':s)
+    RetireInt n -> (n', delete n s)
+  out = fmap snd s
+-}
