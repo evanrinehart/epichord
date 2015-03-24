@@ -1,4 +1,4 @@
-ghc -threaded -O2 -Wall -o core Main.hs
+ghc -threaded -O2 -Wall -fno-warn-unused-do-bind -o core Main.hs
 gcc -o sound -framework Foundation -framework CoreMidi sound.c
 gcc -o Epichord -framework Foundation -framework AppKit video.m
 

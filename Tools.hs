@@ -9,10 +9,10 @@ import Keys
 
 boundedScroll :: E Double -> X Double -> Double -> X Double
 boundedScroll go scale start =
-  accum start boundedScrollTrans (snapshot go scale)
+  mealy start boundedScrollTrans (snapshot (,) scale go)
 
 boundedScrollTrans :: (Double, Double) -> Double -> Double
-boundedScrollTrans (delta, scale) s =
+boundedScrollTrans (scale, delta) s =
   if delta > 0
     then min 1 (s+delta*scale)
     else max 0 (s+delta*scale)
@@ -61,7 +61,7 @@ fromKeyboard k = case k of
 counter :: Int -> E () -> X Int
 counter start bump = out where
   out = trap 0 bumpToNumber
-  bumpToNumber = snapshot_ bump nextNumber
+  bumpToNumber = snapshot_ nextNumber bump
   nextNumber = fmap (+1) out
 
 

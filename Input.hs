@@ -1,7 +1,4 @@
-module Input (
-  inputWorker,
-  MouseButton(..)
-) where
+module Input where
 
 import Debug.Trace (trace)
 import Text.Parsec
@@ -14,6 +11,7 @@ import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Char
 import Control.Concurrent
+import Control.Concurrent.STM
 
 import R2
 import Rect
@@ -37,6 +35,69 @@ data RawInput =
   MenuAbout |
   Quit
     deriving (Show, Eq, Ord)
+
+mouseOnly :: RawInput -> Maybe R2
+mouseOnly (Mouse x y) = Just (x,y)
+mouseOnly _ = Nothing
+
+clickOnly :: RawInput -> Maybe MouseButton
+clickOnly (Click mb) = Just mb
+clickOnly _ = Nothing
+
+releaseOnly :: RawInput -> Maybe MouseButton
+releaseOnly (Release mb) = Just mb
+releaseOnly _ = Nothing
+
+keyupOnly :: RawInput -> Maybe Key
+keyupOnly (KeyUp k) = Just k
+keyupOnly _ = Nothing
+
+keydownOnly :: RawInput -> Maybe Key
+keydownOnly (KeyDown k) = Just k
+keydownOnly _ = Nothing
+
+charOnly :: RawInput -> Maybe Char
+charOnly (Character c) = Just c
+charOnly _ = Nothing
+
+resizeOnly :: RawInput -> Maybe (Rect ())
+resizeOnly (Resize w h) = Just (Rect () 0 0 (realToFrac w) (realToFrac h))
+--resizeOnly :: RawInput -> Maybe R2
+--resizeOnly (Resize w h) = Just (realToFrac w, realToFrac h)
+resizeOnly _ = Nothing
+
+wheelOnly :: RawInput -> Maybe Double
+wheelOnly (Wheel dy) = Just dy
+wheelOnly _ = Nothing
+
+filepickOnly :: RawInput -> Maybe FilePath
+filepickOnly (FilePick fp) = Just fp
+filepickOnly _ = Nothing
+
+menuNewOnly :: RawInput -> Maybe ()
+menuNewOnly MenuNew = Just ()
+menuNewOnly _ = Nothing
+
+menuOpenOnly :: RawInput -> Maybe ()
+menuOpenOnly MenuOpen = Just ()
+menuOpenOnly _ = Nothing
+
+menuSaveOnly :: RawInput -> Maybe ()
+menuSaveOnly MenuSave = Just ()
+menuSaveOnly _ = Nothing
+
+menuSaveAsOnly :: RawInput -> Maybe ()
+menuSaveAsOnly MenuSaveAs = Just ()
+menuSaveAsOnly _ = Nothing
+
+menuAboutOnly :: RawInput -> Maybe ()
+menuAboutOnly MenuAbout = Just ()
+menuAboutOnly _ = Nothing
+
+quitOnly :: RawInput -> Maybe ()
+quitOnly Quit = Just ()
+quitOnly _ = Nothing
+
 
 newtype MouseButton = MouseButton Int
   deriving (Show, Eq, Ord)
@@ -138,27 +199,8 @@ handleEvents h eat = forever $ do
     Nothing -> hPutStrLn stderr ("** CORE unrecognized input " ++ line)
     Just r -> eat r
 
-inputWorker :: Handle
-            -> (R2 -> IO ())
-            -> (MouseButton -> IO ())
-            -> (MouseButton -> IO ())
-            -> (Rect () -> IO ())
-            -> (Double -> IO ())
-            -> (() -> IO ())
-            -> (Key -> IO ())
-            -> (Key -> IO ())
-            -> IO ()
-inputWorker h mouse click release window wheel quit keydown keyup =
-  handleEvents h $ \i -> case i of
-    Mouse x y -> mouse (x,y)
-    Resize w h -> window (Rect () 0 0 (realToFrac w) (realToFrac h))
-    Click mb -> click mb
-    Release mb -> release mb
-    KeyDown k -> keydown k
-    KeyUp k -> keyup k
-    Quit -> quit ()
---    Character c -> char c
-    Wheel w -> wheel w
---    e -> print e
-    _ -> return ()
-
+newInputWorker :: Handle -> IO (IO RawInput)
+newInputWorker h = do
+  inCh <- newTChanIO
+  forkIO (handleEvents h (atomically . writeTChan inCh))
+  return (atomically (readTChan inCh))
